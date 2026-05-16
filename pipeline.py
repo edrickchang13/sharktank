@@ -6,10 +6,10 @@ once real Tencent credentials are in place.
 
 import time
 
+import chunker
 import cos
 import hunyuan
 import ivh
-import tts
 
 
 def respond_to_pitch(
@@ -27,7 +27,7 @@ def respond_to_pitch(
     """
     start = time.monotonic()
     text = hunyuan.chat(judge_key, transcript, mood, history)
-    audio_bytes = tts.synthesize_for_judge(text, judge_key)
+    audio_bytes = chunker.synthesize_long(text, judge_key)
     render = ivh.render_judge(judge_key, audio_bytes, mode=render_mode)
     latency_ms = int((time.monotonic() - start) * 1000)
     return {
