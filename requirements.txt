@@ -1,0 +1,4 @@
+tencentcloud-sdk-python>=3.0.1200
+cos-python-sdk-v5>=1.9.30
+python-dotenv>=1.0.0
+requests>=2.31.0
