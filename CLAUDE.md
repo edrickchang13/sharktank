@@ -18,6 +18,15 @@ Concretely:
 - No Co-Authored-By trailers in commits
 - Use commas, periods, parentheses, or split sentences instead of em-dashes
 
+## Secrets policy (CRITICAL)
+
+- **NEVER paste real credentials into any tracked file.** Not in README, not in HANDOFF docs, not in code comments, not in commit messages.
+- Tracked files use placeholders only: `<from P1 via secure channel>`, `<rotate via console>`, etc.
+- Real values live ONLY in local `.env` which is gitignored.
+- Credential handoff to teammates happens via DM / Signal / 1Password share, never via a tracked Markdown file.
+- If a real secret lands in a tracked file by mistake: rotate the key immediately, then scrub. History scrub is cosmetic without rotation since GitHub indexes are scraped by bots.
+- `.gitignore` blocks `.env*` (except `.env.example`), `*.pem`, `*.key`, `secrets/`, `credentials.json`, `service-account*.json`, and cloud-config dirs.
+
 ## What this project is
 
 Shark Tank pitch simulator for ACM x AIC Hack-A-Stack at SCU, May 16 2026, 6-hour sprint track. User pitches their startup against 3 AI judge avatars modeled on Cuban, O'Leary, and Corcoran. Judges grill the user, read mood/confidence via webcam, and adapt grilling style.
@@ -65,7 +74,7 @@ P3 browser frontend
 3. **Judge system prompts**: delivered via `judges_export.json` for P2 to drop into Vision Agents `instructions` field per active judge
 4. **COS endpoints at runtime**: P2 calls `cos.upload_audio(session_id, turn_idx, judge_key, audio_bytes)` and `cos.upload_session(session_id, data)` directly from the Vision Agents callback
 
-The full handoff doc is in `HANDOFF_TO_P2.md`.
+Credentials are sent via a secure channel (DM, Signal, 1Password) and never committed. Non-secret deliverables (judge prompts, rotation logic, COS schemas) live in `judges_export.json` and `p2_reference/`.
 
 ## File map
 
@@ -78,7 +87,7 @@ The full handoff doc is in `HANDOFF_TO_P2.md`.
 | `trtc.py` | Pure-stdlib UserSig generation, `generate_user_sig`, `make_room_credentials` |
 | `cos.py` | Session JSON + per-turn audio upload with presigned URLs |
 | `smoke_test.py` | 10 tests covering judges, trtc, cos, json export, writing style |
-| `HANDOFF_TO_P2.md` | Credential and config handoff package |
+| `p2_reference/vision_agents_starter.py` | Runnable starter file P2 forks for the Vision Agents backend |
 | `README.md` | Quickstart and architecture overview |
 | `.env.example` | Required env vars (TRTC, Google Gemini, COS) |
 | `requirements.txt` | 2 deps: cos-python-sdk-v5, python-dotenv |

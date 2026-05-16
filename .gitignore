@@ -1,8 +1,21 @@
-# Secrets
+# Secrets: NEVER commit any file matching these.
+# Real credentials live ONLY in local .env (this file is gitignored).
+# Tracked files MUST use placeholders like <from P1 via secure channel>, never real values.
 .env
-.env.local
+.env.*
+!.env.example
 *.pem
 *.key
+*.p12
+*.pfx
+secrets/
+credentials.json
+service-account*.json
+*.cred
+*.credentials
+.aws/
+.gcp/
+.azure/
 
 # Python
 __pycache__/

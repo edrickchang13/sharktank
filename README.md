@@ -71,7 +71,11 @@ P2 provides their own `STREAM_API_KEY` plus `STREAM_API_SECRET` (for Vision Agen
 
 ## Handoff to P2
 
-The full credential package, the three judge prompts, and the cos.py call signatures are bundled in [`HANDOFF_TO_P2.md`](./HANDOFF_TO_P2.md). The JSON form of the prompts lives in [`judges_export.json`](./judges_export.json). Read those two files first when wiring P1 into Vision Agents.
+The three judge prompts and the rotation logic live in [`judges_export.json`](./judges_export.json). Read it first when wiring P1 into Vision Agents.
+
+**Credentials are NEVER committed.** P1 sends `TRTC_SDK_APP_ID`, `TRTC_SECRET_KEY`, `GOOGLE_API_KEY`, `TENCENT_SECRET_ID`, `TENCENT_SECRET_KEY`, and `COS_BUCKET` to P2 via a secure channel (DM, Signal, 1Password share). P2 pastes them into their own local `.env` (gitignored).
+
+P2 can also fork [`p2_reference/vision_agents_starter.py`](./p2_reference/vision_agents_starter.py) which wires Vision Agents + Gemini Live + the COS callbacks.
 
 ## Live files in this repo
 
@@ -80,7 +84,7 @@ The full credential package, the three judge prompts, and the cos.py call signat
 - `trtc.py` generates UserSig with pure stdlib HMAC-SHA256, server-side only.
 - `cos.py` handles session JSON and per-turn audio upload, plus presigned URLs.
 - `smoke_test.py` checks that trtc, cos, and judges still load and behave.
-- `HANDOFF_TO_P2.md` is the credential and config handoff package.
+- `p2_reference/vision_agents_starter.py` is the runnable starter P2 forks.
 - `CLAUDE.md` is the project tracker, loaded automatically by Claude Code.
 - `archive/` holds obsolete modules from the pre-pivot stack. Kept for git history only.
 
