@@ -1,4 +1,4 @@
-# Shark Tank Simulator — Claude Project Context
+# Shark Tank Simulator: Claude Project Context
 
 This file is loaded automatically when Claude Code runs in this repo. Read it first.
 
@@ -24,7 +24,7 @@ Shark Tank pitch simulator for ACM x AIC Hack-A-Stack at SCU, May 16 2026, 6-hou
 
 Sponsor tracks: **Tencent Cloud** (TRTC transport, COS storage) + **GetStream Vision Agents** (the entire backend orchestration).
 
-## Current stack (after two pivots)
+## Current stack (after three pivots)
 
 ```
 User webcam + mic
@@ -32,8 +32,9 @@ User webcam + mic
     v
 Vision Agents (P2) -- feat/tencent-rtc branch
     - tencent.Edge() WebRTC transport (P1's TRTC creds)
-    - gemini.Realtime(fps=3) -- sole LLM, reads webcam, generates judge responses
-    - elevenlabs.TTS(voice_id) -- swapped per active judge (P1's voice IDs)
+    - gemini.Realtime(model="gemini-2.5-flash-native-audio-preview-12-2025", config=...)
+      - sole LLM, native audio output via response_modalities=[Modality.AUDIO]
+      - voice swapped per active judge: Cuban=Charon, OLeary=Orus, Corcoran=Aoede
     - smart-turn VAD
     - mood processor (snapshots every ~3s)
     - websocket to P3: { judge, text, audio }
@@ -53,14 +54,14 @@ P3 browser frontend
 
 | Role | Owner | Scope |
 | - | - | - |
-| P1 | Edrick (this repo) | TRTC creds handoff, ElevenLabs creds handoff, COS session logging, judge prompts as deliverable |
-| P2 | Teammate | Full Vision Agents backend (tencent.Edge, gemini.Realtime, elevenlabs.TTS, smart-turn, websocket) |
+| P1 | Edrick (this repo) | TRTC creds handoff, Google Gemini API key handoff, COS session logging, judge prompts as deliverable |
+| P2 | Teammate | Full Vision Agents backend (tencent.Edge, gemini.Realtime with native audio, smart-turn, websocket) |
 | P3 | Teammate | Browser frontend, 6 pixel-art judge images, websocket client, end screen |
 
 ## P1 deliverables to P2
 
 1. **TRTC credentials**: `TRTC_SDK_APP_ID` + `TRTC_SECRET_KEY` from console.trtc.io
-2. **ElevenLabs credentials**: `ELEVENLABS_API_KEY` + 3 voice IDs (Cuban/O'Leary/Corcoran)
+2. **Google Gemini API key**: `GOOGLE_API_KEY` from AI Studio (Gemini Live capable). Voice names (Charon/Orus/Aoede) are picked in P2's Vision Agents init, not in env.
 3. **Judge system prompts**: delivered via `judges_export.json` for P2 to drop into Vision Agents `instructions` field per active judge
 4. **COS endpoints at runtime**: P2 calls `cos.upload_audio(session_id, turn_idx, judge_key, audio_bytes)` and `cos.upload_session(session_id, data)` directly from the Vision Agents callback
 
@@ -79,7 +80,7 @@ The full handoff doc is in `HANDOFF_TO_P2.md`.
 | `smoke_test.py` | 10 tests covering judges, trtc, cos, json export, writing style |
 | `HANDOFF_TO_P2.md` | Credential and config handoff package |
 | `README.md` | Quickstart and architecture overview |
-| `.env.example` | Required env vars with prefilled voice IDs |
+| `.env.example` | Required env vars (TRTC, Google Gemini, COS) |
 | `requirements.txt` | 2 deps: cos-python-sdk-v5, python-dotenv |
 
 ### Archived (kept for git history, do not import)
@@ -87,7 +88,7 @@ The full handoff doc is in `HANDOFF_TO_P2.md`.
 | File | Why archived |
 | - | - |
 | `archive/hunyuan.py` | Hunyuan dropped, Gemini Live is sole LLM |
-| `archive/tts.py` | Tencent TTS replaced by ElevenLabs (in P2's domain) |
+| `archive/tts.py` | Tencent TTS dropped, gemini.Realtime now emits audio natively (in P2's domain) |
 | `archive/ivh.py` | IVH dropped, 2D pixel images instead (P3 owns) |
 | `archive/chunker.py` | Existed for Tencent TTS 500-char limit, no longer needed |
 | `archive/pipeline.py` | Orchestration moved to Vision Agents |
@@ -103,23 +104,22 @@ See `.env.example`. Summary:
 | - | - | - |
 | `TENCENT_SECRET_ID` / `TENCENT_SECRET_KEY` | console.cloud.tencent.com/cam | COS only (Hunyuan and TTS dropped) |
 | `TRTC_SDK_APP_ID` / `TRTC_SECRET_KEY` | console.trtc.io | Handoff to P2 for tencent.Edge() |
-| `ELEVENLABS_API_KEY` | elevenlabs.io dashboard | Handoff to P2 for elevenlabs.TTS() |
-| `ELEVENLABS_VOICE_CUBAN` / `_OLEARY` / `_CORCORAN` | ElevenLabs voice library | Handoff to P2, prefilled with Brian/Bill/Alice |
+| `GOOGLE_API_KEY` | aistudio.google.com | Handoff to P2 for gemini.Realtime() (LLM + native audio) |
+| `GEMINI_MODEL` | constant | Handoff to P2, default `gemini-2.5-flash-native-audio-preview-12-2025` |
 | `COS_BUCKET` / `COS_REGION` | COS console | P1 session logging |
 
 ## Architecture decisions log (most recent first)
 
-1. **19:44** Hunyuan dropped entirely. Gemini Live becomes sole LLM. Judge prompts move to Vision Agents `instructions` field. P1 scope reduces to creds handoff + COS logging.
-2. **19:30** Tencent IVH dropped (needs purchased avatar key). HeyGen dropped. P3 builds custom 2D pixel images (6 total). Tencent TTS dropped, ElevenLabs replaces it. Websocket schema locked: `{ judge, text, audio }`.
-3. **18:43** Original 3-person split: P1 = all Tencent (IVH, TRTC, Hunyuan, TTS, COS), P2 = GetStream, P3 = OpenCV/pyaudio frontend.
+1. **20:00** Separate TTS plugin dropped. Vision Agents gemini.Realtime ships with response_modalities=[AUDIO] by default. Single API call produces both judge text and audio. Per-judge voice swap via voice_name param (Charon/Orus/Aoede).
+2. **19:44** Hunyuan dropped entirely. Gemini Live becomes sole LLM. Judge prompts move to Vision Agents `instructions` field. P1 scope reduces to creds handoff + COS logging.
+3. **19:30** Tencent IVH dropped (needs purchased avatar key). HeyGen dropped. P3 builds custom 2D pixel images (6 total). Tencent TTS dropped, replaced by an external TTS plugin (later dropped, see entry 1). Websocket schema locked: `{ judge, text, audio }`.
+4. **18:43** Original 3-person split: P1 = all Tencent (IVH, TRTC, Hunyuan, TTS, COS), P2 = GetStream, P3 = OpenCV/pyaudio frontend.
 
 ## Known gotchas
 
-- **ElevenLabs free tier**: 10,000 chars/month. Roughly 15-17 judge turns. Bump to Starter ($5/30k chars) if demoing more.
-- **ElevenLabs commercial use**: requires Starter+. Free tier is non-commercial.
-- **ElevenLabs voice ID sunset**: default voice IDs deprecate Dec 31 2026, fine for the demo.
+- **Gemini Live audio format**: native audio outputs 24kHz PCM, not MP3. P3 frontend may need to handle PCM or P2 transcodes.
+- **Vision Agents agent.llm hot-swap**: unconfirmed whether Vision Agents supports reassigning `agent.llm` mid-session. May need agent reconstruction per judge change.
 - **TRTC SDKSecretKey != CAM SecretKey**: two separate consoles, two separate credentials.
-- **Vision Agents instructions hot-swap**: unconfirmed whether Vision Agents supports changing `instructions` mid-session. May need a fresh agent per judge change.
 - **smart-turn VAD under tencent.Edge**: unconfirmed compatibility on the feat/tencent-rtc branch.
 
 ## Quickstart
