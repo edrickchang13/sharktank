@@ -567,6 +567,11 @@
       opacity: 0;
       transform: translateY(-10px) scale(0.97);
     }
+    #judge-img.talking {
+      filter:
+        drop-shadow(0 24px 48px rgba(0, 0, 0, 0.6))
+        drop-shadow(0 0 32px rgba(232, 184, 0, 0.55));
+    }
 
     #judge-name-overlay {
       position: absolute;
@@ -1018,7 +1023,7 @@
   <div class="panel" id="judge-panel">
     <div class="panel-label"><span class="panel-label-dot"></span>The Judge</div>
     <div class="on-air"><span class="on-air-dot"></span>On Air</div>
-    <img id="judge-img" src="/assets/judges/cuban.png" alt="Mark Cuban">
+    <img id="judge-img" src="/assets/judges/cuban-idle.png" alt="Mark Cuban">
     <div id="judge-name-overlay">Mark Cuban</div>
     <div id="judge-subtitle">Shark</div>
   </div>
@@ -1059,9 +1064,9 @@ const WS_URL    = `ws://${location.hostname}:8000/ws`;
 const API_BASE  = `http://${location.hostname}:8000`;
 
 const JUDGE_INFO = {
-  cuban:    { name: 'Mark Cuban',         subtitle: 'Dallas Mavericks',  img: '/assets/judges/cuban.png'    },
-  oleary:   { name: "Kevin O'Leary",      subtitle: 'Mr. Wonderful',     img: '/assets/judges/oleary.png'   },
-  corcoran: { name: 'Barbara Corcoran',   subtitle: 'Real Estate Mogul', img: '/assets/judges/corcoran.png' },
+  cuban:    { name: 'Mark Cuban',         subtitle: 'Dallas Mavericks',  img: '/assets/judges/cuban-idle.png',    talking: '/assets/judges/cuban-talking.png'    },
+  oleary:   { name: "Kevin O'Leary",      subtitle: 'Mr. Wonderful',     img: '/assets/judges/oleary-idle.png',   talking: '/assets/judges/oleary-talking.png'   },
+  corcoran: { name: 'Barbara Corcoran',   subtitle: 'Real Estate Mogul', img: '/assets/judges/corcoran-idle.png', talking: '/assets/judges/corcoran-talking.png' },
 };
 
 // ---------------------------------------------------------------------------
@@ -1265,6 +1270,14 @@ function handleMessage(msg) {
         console.log('[scene]', msg.scene);
       }
       break;
+
+    case 'speaking_start':
+      setJudgeTalking(msg.judge, true);
+      break;
+
+    case 'speaking_end':
+      setJudgeTalking(msg.judge, false);
+      break;
   }
 }
 
@@ -1283,7 +1296,17 @@ function swapJudge(key) {
     judgeNameEl.textContent = info.name;
     judgeSubtitle.textContent = info.subtitle;
     judgeImg.classList.remove('swap');
+    judgeImg.classList.remove('talking');
   }, 200);
+}
+
+function setJudgeTalking(key, talking) {
+  const info = JUDGE_INFO[key];
+  if (!info) return;
+  const target = talking ? info.talking : info.img;
+  if (judgeImg.src.endsWith(target)) return;
+  judgeImg.src = target;
+  judgeImg.classList.toggle('talking', !!talking);
 }
 
 function setConfidence(mood) {
