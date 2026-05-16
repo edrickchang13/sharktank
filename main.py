@@ -89,9 +89,14 @@ _mood_backoff_until: float = 0.0
 
 
 def _analyze_frame(jpeg_bytes: bytes) -> tuple[float, str]:
-    """Sync Gemini Vision call. Runs in executor; raises on failure."""
+    """Sync Gemini Vision call. Runs in executor; raises on failure.
+
+    Prefers GOOGLE_API_KEY_V2 so mood vision shares a different quota bucket
+    than the main Gemini Live agent on GOOGLE_API_KEY. Falls back to V1.
+    """
     b64 = base64.b64encode(jpeg_bytes).decode()
-    client = genai.Client(api_key=os.environ["GOOGLE_API_KEY"])
+    api_key = os.environ.get("GOOGLE_API_KEY_V2") or os.environ["GOOGLE_API_KEY"]
+    client = genai.Client(api_key=api_key)
     resp = client.models.generate_content(
         model=_MOOD_MODEL,
         contents=[{
