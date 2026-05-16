@@ -1408,45 +1408,32 @@ pauseBtn.addEventListener('click', () => {
     console.warn('Pause toggle error:', e);
   }
 
-  // Silence (or restore) the judges' audio playback locally so a paused
-  // founder also stops hearing Cuban talking back.
+  // Silence (or restore) the judges' audio playback locally so a paused founder also stops hearing Cuban.
   try {
-    document.querySelectorAll('#remote-audio audio').forEach(a => {
-      a.muted = isPaused;
-    });
-  } catch (e) {
-    console.warn('Remote audio mute toggle error:', e);
-  }
+    document.querySelectorAll('#remote-audio audio').forEach(a => { a.muted = isPaused; });
+  } catch (e) { console.warn('Remote audio mute toggle error:', e); }
 
-  // Tell the backend so server-side logic can react (e.g. stop generating
-  // judge responses while the user is paused).
+  // Tell the backend so server-side logic can react while the user is paused.
   if (ws && ws.readyState === WebSocket.OPEN) {
-    try {
-      ws.send(JSON.stringify({ type: 'user_paused', paused: isPaused }));
-    } catch (e) {
-      console.warn('user_paused send error:', e);
-    }
+    try { ws.send(JSON.stringify({ type: 'user_paused', paused: isPaused })); }
+    catch (e) { console.warn('user_paused send error:', e); }
   }
 
   document.body.classList.toggle('paused', isPaused);
   pauseBtn.textContent = isPaused ? 'Resume' : 'Pause';
 });
 
-// Watch the remote audio sink so any <audio> element added by TRTC after
-// pause-start still gets muted while the user is paused.
+// Watch the remote audio sink so any <audio> added by TRTC after pause-start still gets muted.
 const remoteAudioSink = document.getElementById('remote-audio');
 if (remoteAudioSink && typeof MutationObserver !== 'undefined') {
-  const remoteAudioObserver = new MutationObserver((mutations) => {
+  new MutationObserver((mutations) => {
     if (!isPaused) return;
     for (const m of mutations) {
       m.addedNodes.forEach((node) => {
-        if (node && node.tagName === 'AUDIO') {
-          node.muted = true;
-        }
+        if (node && node.tagName === 'AUDIO') node.muted = true;
       });
     }
-  });
-  remoteAudioObserver.observe(remoteAudioSink, { childList: true, subtree: true });
+  }).observe(remoteAudioSink, { childList: true, subtree: true });
 }
 
 // ---------------------------------------------------------------------------
