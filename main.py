@@ -1,22 +1,14 @@
-"""Shark Tank FastAPI server.
+"""Shark Tank FastAPI server (LiveKit + LemonSlice stack).
 
-Endpoints:
-  GET  /              -> serves frontend/index.html
-  GET  /assets/...    -> static assets (judge images)
-  GET  /credentials   -> TRTC credentials for the browser user
-  WS   /ws            -> websocket broadcast channel for judge events
-
-The websocket also accepts inbound mood frames from the browser:
-  {"type": "mood_frame", "image": "<base64 jpeg>"}
-Each frame is sent to Gemini Vision in a thread executor, the result updates
-``agent_mod.session.mood`` and is broadcast back as a ``mood_update`` event.
-
-Runs agent.run_agent() concurrently with the HTTP server via asyncio.gather().
+Endpoints: GET / (index), GET /assets/* (static), GET /token (LiveKit JWT),
+WS /ws (broadcast + mood Vision), POST /session_log (forwards to COS).
+The LiveKit agent runs as a separate worker process, not in this server.
 """
 
 import asyncio
 import base64
 import json
+import logging
 import os
 import re
 import time
@@ -24,30 +16,31 @@ import uuid
 from typing import Any
 
 import uvicorn
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from dotenv import load_dotenv
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from google import genai
+from livekit import api
 
-import agent as agent_mod
-import trtc as trtc_mod
+import cos
+
+load_dotenv()
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(message)s")
+
+# Captured at import so mood Vision keeps a separate quota bucket from agent Gemini usage.
+_VISION_KEY: str = os.environ.get("GOOGLE_API_KEY", "")
 
 app = FastAPI()
-
 app.mount("/assets", StaticFiles(directory="assets"), name="assets")
 
 _ws_clients: list[WebSocket] = []
-_session: agent_mod.Session | None = None
 
 
-def set_session(session: agent_mod.Session) -> None:
-    """Called by agent_mod once the live Session is constructed."""
-    global _session
-    _session = session
-
-
-async def broadcast(msg: dict) -> None:
-    dead = []
+async def broadcast(msg: dict[str, Any]) -> None:
+    """Send a JSON message to every connected websocket client."""
+    dead: list[WebSocket] = []
     for ws in _ws_clients:
         try:
             await ws.send_json(msg)
@@ -61,41 +54,68 @@ async def broadcast(msg: dict) -> None:
 
 
 @app.get("/")
-async def index():
+async def index() -> FileResponse:
+    """Serve the frontend single-page app."""
     return FileResponse("frontend/index.html")
 
 
-@app.get("/credentials")
-async def get_credentials(room_id: int):
-    user_id = "founder-" + uuid.uuid4().hex[:8]
+@app.get("/token")
+async def get_token(room: str, judge_key: str, identity: str | None = None) -> JSONResponse:
+    """Issue a LiveKit JWT for the given room, attaching judge_key as a participant attribute."""
+    key = os.environ.get("LIVEKIT_API_KEY")
+    secret = os.environ.get("LIVEKIT_API_SECRET")
+    url = os.environ.get("LIVEKIT_URL")
+    if not key or not secret or not url:
+        return JSONResponse({"error": "LIVEKIT_API_KEY/SECRET/URL must be set"}, status_code=500)
+    ident = identity or ("founder-" + uuid.uuid4().hex[:8])
     try:
-        creds = trtc_mod.make_room_credentials(room_id=room_id, user_id=user_id)
-        return JSONResponse(creds)
+        token = (
+            api.AccessToken(key, secret)
+            .with_identity(ident)
+            .with_name(ident)
+            .with_grants(api.VideoGrants(
+                room_join=True, room=room, can_publish=True, can_subscribe=True,
+            ))
+            .with_attributes({"judge_key": judge_key})
+            .to_jwt()
+        )
     except Exception as e:
+        logger.error("token mint failed: %s", e)
         return JSONResponse({"error": str(e)}, status_code=500)
+    return JSONResponse({"token": token, "url": url, "ws_url": url, "identity": ident, "room": room})
+
+
+@app.post("/session_log")
+async def session_log(request: Request) -> JSONResponse:
+    """Receive a session log from the agent and upload to COS."""
+    try:
+        payload = await request.json()
+    except Exception as e:
+        return JSONResponse({"error": f"bad json: {e}"}, status_code=400)
+    session_id = payload.get("session_id") if isinstance(payload, dict) else None
+    if not isinstance(session_id, str) or not session_id:
+        return JSONResponse({"error": "session_id required"}, status_code=400)
+    try:
+        loop = asyncio.get_running_loop()
+        url = await loop.run_in_executor(None, cos.upload_session, session_id, payload)
+    except Exception as e:
+        logger.error("session_log upload failed: %s", e)
+        return JSONResponse({"error": str(e)}, status_code=500)
+    return JSONResponse({"url": url})
 
 
 # gemini-2.5-flash has separate free-tier quota from gemini-2.0-flash.
-# Override via MOOD_MODEL env if you need to swap (e.g. gemini-2.5-flash-lite).
 _MOOD_MODEL = os.environ.get("MOOD_MODEL", "gemini-2.5-flash")
-
-# Server-side rate limit: skip frames arriving faster than this. Cheap defence
-# against accidental client-side flooding and against 429 quota errors.
 _MOOD_MIN_INTERVAL_S = float(os.environ.get("MOOD_MIN_INTERVAL_S", "8.0"))
-_mood_last_call_ts: float = 0.0
-# When the API returns a 429, pause analysis entirely for this long.
 _MOOD_BACKOFF_S = float(os.environ.get("MOOD_BACKOFF_S", "30.0"))
+_mood_last_call_ts: float = 0.0
 _mood_backoff_until: float = 0.0
 
 
 def _analyze_frame(jpeg_bytes: bytes) -> tuple[float, str]:
-    """Sync Gemini Vision call. Runs in executor; raises on failure.
-
-    Prefers GOOGLE_API_KEY_V2 so mood vision shares a different quota bucket
-    than the main Gemini Live agent on GOOGLE_API_KEY. Falls back to V1.
-    """
+    """Sync Gemini Vision call. Runs in executor; raises on failure."""
     b64 = base64.b64encode(jpeg_bytes).decode()
-    api_key = os.environ.get("GOOGLE_API_KEY_V2") or os.environ["GOOGLE_API_KEY"]
+    api_key = _VISION_KEY or os.environ.get("GOOGLE_API_KEY_V2", "")
     client = genai.Client(api_key=api_key)
     resp = client.models.generate_content(
         model=_MOOD_MODEL,
@@ -122,21 +142,17 @@ def _analyze_frame(jpeg_bytes: bytes) -> tuple[float, str]:
 
 async def _handle_mood_frame(image_b64: str) -> None:
     global _mood_last_call_ts, _mood_backoff_until
-
     now = time.monotonic()
     if now < _mood_backoff_until:
-        return  # quota-exhausted, silently drop
+        return
     if now - _mood_last_call_ts < _MOOD_MIN_INTERVAL_S:
-        return  # too soon since last analysis
-
+        return
     try:
         jpeg = base64.b64decode(image_b64)
     except Exception as e:
-        print(f"[ws mood] bad base64: {e}", flush=True)
+        logger.warning("[ws mood] bad base64: %s", e)
         return
-
     _mood_last_call_ts = now
-
     loop = asyncio.get_running_loop()
     try:
         conf, scene = await loop.run_in_executor(None, _analyze_frame, jpeg)
@@ -144,23 +160,16 @@ async def _handle_mood_frame(image_b64: str) -> None:
         msg = str(e)
         if "429" in msg or "RESOURCE_EXHAUSTED" in msg:
             _mood_backoff_until = time.monotonic() + _MOOD_BACKOFF_S
-            print(
-                f"[ws mood] 429 quota hit, pausing analysis for "
-                f"{_MOOD_BACKOFF_S:.0f}s",
-                flush=True,
-            )
+            logger.warning("[ws mood] 429 quota hit, pausing for %.0fs", _MOOD_BACKOFF_S)
         else:
-            print(f"[ws mood] gemini failed: {msg[:200]}", flush=True)
+            logger.warning("[ws mood] gemini failed: %s", msg[:200])
         return
-
-    if _session is not None:
-        _session.mood = conf
-
     await broadcast({"type": "mood_update", "mood": conf, "scene": scene})
 
 
 @app.websocket("/ws")
-async def ws_endpoint(websocket: WebSocket):
+async def ws_endpoint(websocket: WebSocket) -> None:
+    """Browser broadcast channel; accepts mood_frame inbound messages."""
     await websocket.accept()
     _ws_clients.append(websocket)
     try:
@@ -174,16 +183,10 @@ async def ws_endpoint(websocket: WebSocket):
                 continue
             if msg.get("type") == "mood_frame" and isinstance(msg.get("image"), str):
                 asyncio.create_task(_handle_mood_frame(msg["image"]))
-            elif msg.get("type") == "user_paused":
-                paused = msg.get("paused")
-                if _session is None or not isinstance(paused, bool):
-                    continue
-                _session.paused = paused
-                print(f"[ws] user paused={paused}", flush=True)
     except WebSocketDisconnect:
         pass
     except Exception as e:
-        print(f"[ws] {e}", flush=True)
+        logger.warning("[ws] %s", e)
     finally:
         try:
             _ws_clients.remove(websocket)
@@ -191,19 +194,5 @@ async def ws_endpoint(websocket: WebSocket):
             pass
 
 
-async def main():
-    agent_mod.set_broadcast(broadcast)
-    agent_mod.set_session_hook(set_session)
-
-    config = uvicorn.Config(
-        app,
-        host="0.0.0.0",
-        port=8000,
-        log_level="warning",
-    )
-    server = uvicorn.Server(config)
-    await asyncio.gather(server.serve(), agent_mod.run_agent())
-
-
 if __name__ == "__main__":
-    asyncio.run(main())
+    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="warning")

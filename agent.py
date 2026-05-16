@@ -1,173 +1,82 @@
+"""Shark Tank judge agent (LiveKit Agents + LemonSlice avatar).
 
+One judge per LiveKit session. Persona is locked at session start from the
+participant attribute ``judge_key`` (default ``cuban``). LemonSlice's
+AvatarSession binds image + movement prompt at start time and cannot be
+hot-swapped, so judge rotation = end this session and start a new one.
 
-"""Shark Tank Vision Agents backend (P2).
-
-Edge: tencent.Edge (Linux) or getstream.Edge fallback.
-LLM: gemini.Realtime per judge -- voice + system instruction baked into config.
-VAD: smart_turn.TurnDetection.
-On each user turn: rotate judge, adapt prompt to mood, emit websocket msg,
-upload audio to COS.
+Audio pipeline: Gemini Live (google.beta.realtime.RealtimeModel) owns
+STT+LLM+TTS in one socket. Domain content (prompts, voices, rotation) is
+reused from judges.py and judges_export.json. COS log via cos.py.
 """
 
-import base64
-import json
-import os
 import asyncio
+import json
+import logging
+import os
 import time
 import uuid
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 
 from dotenv import load_dotenv
-from google.genai.types import (
-    LiveConnectConfigDict,
-    Modality,
-    PrebuiltVoiceConfigDict,
-    SpeechConfigDict,
-    VoiceConfigDict,
+
+from livekit.agents import (
+    Agent,
+    AgentServer,
+    AgentSession,
+    JobContext,
+    cli,
+    room_io,
 )
+from livekit.plugins import google, lemonslice
 
-# Optional VAD tuning types -- newer google-genai exposes these for tightening
-# silence detection. If unavailable, we fall back to library defaults (slow).
-try:
-    from google.genai.types import (
-        AutomaticActivityDetection,
-        EndSensitivity,
-        RealtimeInputConfig,
-        StartSensitivity,
-    )
-    _FAST_VAD = RealtimeInputConfig(
-        automatic_activity_detection=AutomaticActivityDetection(
-            start_of_speech_sensitivity=StartSensitivity.START_SENSITIVITY_HIGH,
-            end_of_speech_sensitivity=EndSensitivity.END_SENSITIVITY_HIGH,
-            # 250ms silence + 20ms prefix is the tightest practical combo;
-            # below that risk cutting off the founder mid-pause.
-            silence_duration_ms=250,
-            prefix_padding_ms=20,
-        )
-    )
-except Exception:
-    _FAST_VAD = None
-
-load_dotenv()
-
-from vision_agents.core import Agent, User
-from vision_agents.core.llm.events import (
-    RealtimeAgentSpeechTranscriptionEvent,
-    RealtimeAudioOutputDoneEvent,
-    RealtimeAudioOutputEvent,
-    RealtimeUserSpeechTranscriptionEvent,
-)
-from vision_agents.plugins import gemini, getstream, smart_turn
 import cos
 import judges
-import trtc as trtc_mod
 
-try:
-    from vision_agents.plugins import tencent as _tencent_mod
-    _TENCENT_AVAILABLE = True
-except ImportError:
-    _TENCENT_AVAILABLE = False
+load_dotenv(".env")
+
+logger = logging.getLogger("shark-tank-judge")
+logger.setLevel(logging.INFO)
+
+
+# ---------------------------------------------------------------------------
+# Static configuration
+# ---------------------------------------------------------------------------
 
 _JUDGES_EXPORT: dict[str, Any] = json.loads(
     (Path(__file__).parent / "judges_export.json").read_text()
 )["judges"]
 
-GEMINI_MODEL = os.environ.get(
+GEMINI_MODEL = os.getenv(
     "GEMINI_MODEL", "gemini-2.5-flash-native-audio-preview-12-2025"
 )
 
-# ---------------------------------------------------------------------------
-# WebSocket broadcast hook (registered by main.py)
-# ---------------------------------------------------------------------------
+# Envvar-overridable avatar URLs so user can swap to real photos without code.
+DEFAULT_AVATAR_URLS: dict[str, str] = {
+    "cuban": os.getenv("CUBAN_AVATAR_URL", "https://iili.io/frL9tuj.png"),
+    "oleary": os.getenv("OLEARY_AVATAR_URL", "https://iili.io/frL9L8u.png"),
+    "corcoran": os.getenv("CORCORAN_AVATAR_URL", "https://iili.io/frL9Qyb.png"),
+}
 
-_broadcast_fn: Optional[Callable] = None
-_session_fn: Optional[Callable] = None
+# Per-judge avatar movement prompt - drives LemonSlice body language.
+AVATAR_PROMPTS: dict[str, str] = {
+    "cuban": (
+        "Be aggressive and direct. Sharp gestures. Quick head movements. "
+        "Lean in when challenging numbers. Show impatience with vague answers."
+    ),
+    "oleary": (
+        "Be cold and analytical. Minimal expression. Steady eye contact. "
+        "Show dismissiveness through subtle facial cues. Lean back, evaluate."
+    ),
+    "corcoran": (
+        "Be warm but sharp. Read the person. Show genuine interest in their "
+        "story. Softer gestures, but pointed when calling out theatrics."
+    ),
+}
 
-
-def set_broadcast(fn: Callable) -> None:
-    global _broadcast_fn
-    _broadcast_fn = fn
-
-
-def set_session_hook(fn: Callable) -> None:
-    """main.py registers a callback to receive the live Session for mood writes."""
-    global _session_fn
-    _session_fn = fn
-
-
-async def _emit_to_p3(payload: dict) -> None:
-    print(f"[ws -> P3] {payload}", flush=True)
-    if _broadcast_fn:
-        try:
-            await _broadcast_fn(payload)
-        except Exception as e:
-            print(f"[ws error] {e}", flush=True)
-
-
-# ---------------------------------------------------------------------------
-# Mood: webcam snapshot -> Gemini vision score (runs in thread pool)
-# ---------------------------------------------------------------------------
-
-_executor = ThreadPoolExecutor(max_workers=1)
-
-
-def _get_mood_sync() -> float:
-    """Mood now arrives from the browser via main.py WS; cv2 path disabled.
-
-    The real signal is set from main.py's WebSocket frame handler which calls
-    Gemini Vision on uploaded JPEGs and writes to ``session.mood`` directly.
-    """
-    return 0.5
-
-
-async def _mood_loop(session: "Session") -> None:
-    """Background task: update session.mood every ~3s without blocking the event loop."""
-    loop = asyncio.get_running_loop()
-    while True:
-        await asyncio.sleep(3)
-        try:
-            session.mood = await loop.run_in_executor(_executor, _get_mood_sync)
-        except asyncio.CancelledError:
-            break
-        except Exception as e:
-            print(f"[mood] {e}", flush=True)
-
-
-# ---------------------------------------------------------------------------
-# Per-judge LLM factory
-# ---------------------------------------------------------------------------
-
-def make_llm_for_judge(judge_key: str, mood: float) -> gemini.Realtime:
-    voice = _JUDGES_EXPORT[judge_key]["gemini_voice"]
-    system_instruction = judges.render_system_prompt(judge_key, mood)
-    config_kwargs: dict[str, Any] = dict(
-        response_modalities=[Modality.AUDIO],
-        speech_config=SpeechConfigDict(
-            voice_config=VoiceConfigDict(
-                prebuilt_voice_config=PrebuiltVoiceConfigDict(voice_name=voice)
-            ),
-            language_code="en-US",
-        ),
-        system_instruction=system_instruction,
-        output_audio_transcription={},
-        input_audio_transcription={},
-    )
-    # Tighten Gemini's silence-to-turn-end window when the model supports it.
-    # Default is ~800-1000ms; 300ms makes the judge feel real-time.
-    if _FAST_VAD is not None:
-        config_kwargs["realtime_input_config"] = _FAST_VAD
-
-    return gemini.Realtime(
-        model=GEMINI_MODEL,
-        config=LiveConnectConfigDict(**config_kwargs),
-        # fps=1 instead of 3: still enough for facial-mood and gesture reads
-        # at hackathon scale, frees compute and bandwidth so audio response
-        # comes back faster.
-        fps=1,
-    )
+VALID_JUDGES = tuple(_JUDGES_EXPORT.keys())
 
 
 # ---------------------------------------------------------------------------
@@ -175,284 +84,156 @@ def make_llm_for_judge(judge_key: str, mood: float) -> gemini.Realtime:
 # ---------------------------------------------------------------------------
 
 @dataclass
-class Session:
-    id: str = field(default_factory=lambda: uuid.uuid4().hex[:8])
+class UserData:
+    """Mutable session state shared across the AgentSession lifecycle."""
+
+    ctx: Optional[JobContext] = None
+    session_id: str = field(default_factory=lambda: uuid.uuid4().hex[:8])
+    judge_key: str = "cuban"
     turn_index: int = 0
-    current_judge_key: str = "cuban"
     mood: float = 0.5
-    paused: bool = False
     transcript_history: list[dict[str, Any]] = field(default_factory=list)
-    _start_ts: float = field(default_factory=time.monotonic, repr=False)
+    start_ts: float = field(default_factory=time.time)
 
-    def record(self, transcript: str, judge_key: str, latency_ms: int) -> None:
-        self.transcript_history.append({
-            "turn_idx": self.turn_index,
-            "transcript": transcript,
-            "judge": judge_key,
-            "mood": self.mood,
-            "latency_ms": latency_ms,
+
+# Module-level session registry so main.py can update mood by session_id.
+_active_sessions: dict[str, UserData] = {}
+
+
+def set_mood(session_id: str, mood: float) -> None:
+    """Update mood for a live session (called by main.py's vision pipeline)."""
+    userdata = _active_sessions.get(session_id)
+    if userdata is None:
+        logger.debug("set_mood: unknown session %s", session_id)
+        return
+    userdata.mood = max(0.0, min(1.0, float(mood)))
+
+
+# ---------------------------------------------------------------------------
+# Judge agent
+# ---------------------------------------------------------------------------
+
+class JudgeAgent(Agent):
+    """Single-judge LiveKit Agent. Persona locked for the session's lifetime."""
+
+    def __init__(self, judge_key: str, mood: float = 0.5) -> None:
+        if judge_key not in VALID_JUDGES:
+            raise ValueError(f"Unknown judge_key: {judge_key!r}")
+        self.judge_key = judge_key
+        instructions = judges.render_system_prompt(judge_key, mood)
+        # TODO(integration): verify google.beta.realtime.RealtimeModel kwargs.
+        # The Live API native-audio model owns STT+LLM+TTS in one socket.
+        realtime_llm = google.beta.realtime.RealtimeModel(
+            model=GEMINI_MODEL,
+            voice=_JUDGES_EXPORT[judge_key]["gemini_voice"],
+            language="en-US",
+            temperature=0.8,
+            instructions=instructions,
+        )
+        super().__init__(instructions=instructions, llm=realtime_llm)
+
+    async def on_enter(self) -> None:
+        """Send an opening line so the founder knows who they are pitching."""
+        userdata: UserData = self.session.userdata
+        judge_name = _JUDGES_EXPORT[self.judge_key]["name"]
+        logger.info(
+            "on_enter session=%s judge=%s", userdata.session_id, self.judge_key
+        )
+        self.session.generate_reply(
+            instructions=(
+                f"You are {judge_name}. Greet the founder in character with "
+                "one short, sharp sentence and immediately ask the opening "
+                "question from your persona. No preamble."
+            )
+        )
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+server = AgentServer()
+
+
+@server.rtc_session(agent_name="shark-tank-judge")
+async def entrypoint(ctx: JobContext) -> None:
+    """Per-room entry point. One judge per session, picked from attributes."""
+    logger.info("entrypoint: connecting to room")
+    await ctx.connect()
+    participant = await ctx.wait_for_participant()
+
+    judge_key = participant.attributes.get("judge_key", "cuban")
+    if judge_key not in VALID_JUDGES:
+        logger.warning("invalid judge_key=%r, defaulting to cuban", judge_key)
+        judge_key = "cuban"
+
+    userdata = UserData(ctx=ctx, judge_key=judge_key)
+    _active_sessions[userdata.session_id] = userdata
+    logger.info(
+        "session=%s judge=%s voice=%s",
+        userdata.session_id,
+        judge_key,
+        _JUDGES_EXPORT[judge_key]["gemini_voice"],
+    )
+
+    judge_agent = JudgeAgent(judge_key=judge_key, mood=userdata.mood)
+
+    session = AgentSession[UserData](
+        userdata=userdata,
+        resume_false_interruption=False,
+    )
+
+    def _record(role: str, event: Any) -> None:
+        text = getattr(event, "transcript", None) or getattr(event, "text", "")
+        if not text or not text.strip():
+            return
+        userdata.transcript_history.append({
+            "turn_idx": userdata.turn_index,
+            "role": role,
+            "text": text,
+            "judge": userdata.judge_key,
+            "mood": round(userdata.mood, 3),
+            "ts": time.time(),
         })
+        if role != "founder":
+            userdata.turn_index += 1
 
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "session_id": self.id,
-            "turns": self.transcript_history,
-            "total_latency_ms": int((time.monotonic() - self._start_ts) * 1000),
+    # TODO(integration): verify event names against installed livekit-agents.
+    session.on("user_speech_committed", lambda e: _record("founder", e))
+    session.on("agent_speech_committed", lambda e: _record(userdata.judge_key, e))
+
+    avatar = lemonslice.AvatarSession(
+        agent_image_url=DEFAULT_AVATAR_URLS[judge_key],
+        agent_prompt=AVATAR_PROMPTS[judge_key],
+    )
+    await avatar.start(session, room=ctx.room)
+
+    async def _upload_on_shutdown() -> None:
+        payload = {
+            "session_id": userdata.session_id,
+            "judge": userdata.judge_key,
+            "turns": userdata.transcript_history,
+            "total_latency_ms": int((time.time() - userdata.start_ts) * 1000),
         }
-
-
-# ---------------------------------------------------------------------------
-# Edge selection
-# ---------------------------------------------------------------------------
-
-def build_edge():
-    trtc_app_id = os.environ.get("TRTC_SDK_APP_ID")
-    trtc_secret = os.environ.get("TRTC_SECRET_KEY")
-
-    if _TENCENT_AVAILABLE and trtc_app_id and trtc_secret:
         try:
-            # video_fps=1 caps how often the agent samples the founder's
-            # video for Gemini. Matches gemini.Realtime(fps=1) and reduces
-            # liteav's per-frame buffering load.
-            edge = _tencent_mod.Edge(
-                sdk_app_id=int(trtc_app_id),
-                key=trtc_secret,
-                video_fps=1,
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(
+                None, cos.upload_session, userdata.session_id, payload
             )
-            print("Edge: Tencent TRTC (video_fps=1)", flush=True)
-            return edge
-        except Exception as e:
-            print(
-                f"Tencent TRTC unavailable ({type(e).__name__}: {e}), "
-                "falling back to GetStream",
-                flush=True,
-            )
+            logger.info("session log uploaded id=%s", userdata.session_id)
+        except Exception as exc:
+            logger.exception("cos upload failed: %s", exc)
+        finally:
+            _active_sessions.pop(userdata.session_id, None)
 
-    print("Edge: GetStream", flush=True)
-    return getstream.Edge()
+    ctx.add_shutdown_callback(_upload_on_shutdown)
 
-
-# ---------------------------------------------------------------------------
-# Agent factory
-# ---------------------------------------------------------------------------
-
-async def _cos_upload_audio(
-    session_id: str, turn_idx: int, judge_key: str, audio_bytes: bytes
-) -> None:
-    loop = asyncio.get_running_loop()
-    try:
-        await loop.run_in_executor(
-            None, cos.upload_audio, session_id, turn_idx, judge_key, audio_bytes
-        )
-    except Exception as e:
-        print(f"[cos] upload_audio failed: {e}", flush=True)
-
-
-def build_agent(session: Session) -> Agent:
-    initial_llm = make_llm_for_judge(session.current_judge_key, session.mood)
-
-    # Drop smart_turn: gemini.Realtime owns VAD internally and silently
-    # disables external turn detectors. Passing it adds a no-op plugin
-    # init cost without affecting behavior. Removing tightens startup.
-    agent = Agent(
-        edge=build_edge(),
-        agent_user=User(name="Shark Tank Judge", id="shark-tank-agent"),
-        instructions="",
-        llm=initial_llm,
+    await session.start(
+        agent=judge_agent,
+        room=ctx.room,
+        room_options=room_io.RoomOptions(delete_room_on_close=True),
     )
-
-    _audio_buffer: list[bytes] = []
-    _is_speaking = {"value": False}
-
-    # vision-agents emits RealtimeUserTranscript / RealtimeAgentTranscript /
-    # RealtimeAudioOutput / RealtimeAudioOutputDone to the LLM's internal
-    # `_output` Stream (consumed by realtime_flow for conversation tracking).
-    # The public PluginBaseEvent variants in core.llm.events are defined but
-    # NEVER emitted, so @agent.subscribe(RealtimeUserSpeechTranscriptionEvent)
-    # silently never fires. Workaround: monkey-patch the LLM's emit methods
-    # so every transcript / audio event also broadcasts to the browser.
-    def _install_emit_patches(llm: Any) -> None:
-        orig_user = llm._emit_user_speech_transcription
-        orig_agent = llm._emit_agent_speech_transcription
-        orig_audio = llm._emit_audio_output_event
-        orig_done = llm._emit_audio_output_done_event
-
-        def patched_user_emit(text: str, *, mode: str) -> None:
-            orig_user(text, mode=mode)
-            if session.paused or not text or not text.strip():
-                return
-            asyncio.ensure_future(_emit_to_p3({
-                "type": "transcript",
-                "judge": "founder",
-                "text": text,
-                "mode": mode,
-                "mood": round(session.mood, 3),
-                "turn_idx": session.turn_index,
-            }))
-
-        def patched_agent_emit(text: str, *, mode: str) -> None:
-            orig_agent(text, mode=mode)
-            if session.paused or not text or not text.strip():
-                return
-            asyncio.ensure_future(_emit_to_p3({
-                "type": "transcript",
-                "judge": session.current_judge_key,
-                "text": text,
-                "mode": mode,
-                "mood": round(session.mood, 3),
-                "turn_idx": session.turn_index,
-            }))
-
-        def patched_audio_emit(pcm: Any, response_id: Any = None) -> None:
-            orig_audio(pcm, response_id=response_id)
-            if session.paused:
-                return
-            if not _is_speaking["value"]:
-                _is_speaking["value"] = True
-                asyncio.ensure_future(_emit_to_p3({
-                    "type": "speaking_start",
-                    "judge": session.current_judge_key,
-                }))
-            samples = getattr(pcm, "samples", None) if pcm is not None else None
-            if samples is not None:
-                try:
-                    raw = samples.tobytes()
-                    if raw:
-                        _audio_buffer.append(raw)
-                except Exception:
-                    pass
-
-        def patched_done_emit(response_id: Any = None, interrupted: bool = False) -> None:
-            orig_done(response_id=response_id, interrupted=interrupted)
-            was_speaking = _is_speaking["value"]
-            _is_speaking["value"] = False
-            if session.paused:
-                _audio_buffer.clear()
-                return
-
-            asyncio.ensure_future(_emit_to_p3({
-                "type": "judge_interrupted" if interrupted else "speaking_end",
-                "judge": session.current_judge_key,
-            }))
-
-            if not interrupted and _audio_buffer:
-                audio_bytes = b"".join(_audio_buffer)
-                _audio_buffer.clear()
-                turn_idx = max(0, session.turn_index)
-                asyncio.create_task(_cos_upload_audio(
-                    session.id, turn_idx, session.current_judge_key, audio_bytes
-                ))
-            else:
-                _audio_buffer.clear()
-
-            # Rotate to next judge after each completed agent turn so the
-            # founder doesn't get Cuban on every question.
-            if not interrupted and was_speaking:
-                session.turn_index += 1
-                next_judge = judges.pick_next_judge(session.turn_index, session.mood)
-                if next_judge != session.current_judge_key:
-                    print(
-                        f"\n[turn {session.turn_index}] judge swap "
-                        f"{session.current_judge_key} -> {next_judge} "
-                        f"(mood {session.mood:.2f})",
-                        flush=True,
-                    )
-                    session.current_judge_key = next_judge
-                    try:
-                        new_llm = make_llm_for_judge(next_judge, session.mood)
-                        agent.llm = new_llm
-                        _install_emit_patches(new_llm)
-                    except Exception as exc:
-                        print(f"[judge swap failed] {exc}", flush=True)
-                asyncio.ensure_future(_emit_to_p3({
-                    "type": "judge",
-                    "judge": session.current_judge_key,
-                    "mood": round(session.mood, 3),
-                    "turn_idx": session.turn_index,
-                }))
-
-        llm._emit_user_speech_transcription = patched_user_emit
-        llm._emit_agent_speech_transcription = patched_agent_emit
-        llm._emit_audio_output_event = patched_audio_emit
-        llm._emit_audio_output_done_event = patched_done_emit
-
-    _install_emit_patches(agent.llm)
-    return agent
-
-
-# ---------------------------------------------------------------------------
-# Join call via TRTC room
-# ---------------------------------------------------------------------------
-
-async def join_call(agent: Agent, session: Session) -> None:
-    # Derive a uint32 numeric room ID from session hex ID (8 hex chars = 32 bits)
-    room_id = int(session.id, 16)
-
-    founder_user_id = "founder-" + uuid.uuid4().hex[:8]
-    creds = trtc_mod.make_room_credentials(room_id=room_id, user_id=founder_user_id)
-
-    print(f"\nSession ID:   {session.id}", flush=True)
-    print(f"TRTC Room ID: {room_id}", flush=True)
-    print(f"\nOpen the frontend:\n  http://localhost:8000/?room_id={room_id}\n", flush=True)
-
-    await _emit_to_p3({
-        "type": "room_ready",
-        "room_id": room_id,
-        "sdk_app_id": creds["sdk_app_id"],
-        "user_id": creds["user_id"],
-        "user_sig": creds["user_sig"],
-    })
-
-    # call_id as decimal string -> TencentEdge.create_call converts to int room_id
-    call = await agent.create_call("default", str(room_id))
-
-    print("Waiting for founder to join the TRTC room...\n", flush=True)
-    async with agent.join(call, participant_wait_timeout=None):
-        await agent.finish()
-
-    try:
-        loop = asyncio.get_running_loop()
-        await loop.run_in_executor(
-            None, cos.upload_session, session.id, session.to_dict()
-        )
-        print(f"Session log uploaded for {session.id}", flush=True)
-    except Exception as e:
-        print(f"[cos] upload_session failed: {e}", flush=True)
-
-    print(f"\nSession {session.id} complete. Turns: {session.turn_index}", flush=True)
-
-
-# ---------------------------------------------------------------------------
-# Entry point (called from main.py via run_agent, or directly)
-# ---------------------------------------------------------------------------
-
-async def run_agent() -> None:
-    session = Session()
-    if _session_fn is not None:
-        try:
-            _session_fn(session)
-        except Exception as e:
-            print(f"[session hook] {e}", flush=True)
-    agent = build_agent(session)
-    print(
-        f"Agent ready -- judge={session.current_judge_key}  "
-        f"voice={_JUDGES_EXPORT[session.current_judge_key]['gemini_voice']}",
-        flush=True,
-    )
-    mood_task = asyncio.create_task(_mood_loop(session))
-    try:
-        await join_call(agent, session)
-    finally:
-        mood_task.cancel()
-        try:
-            await mood_task
-        except asyncio.CancelledError:
-            pass
-
-
-async def run() -> None:
-    await run_agent()
 
 
 if __name__ == "__main__":
-    asyncio.run(run())
+    cli.run_app(server)

@@ -4,14 +4,12 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Shark Tank Simulator</title>
-  <script src="https://unpkg.com/trtc-js-sdk/trtc.js"></script>
+  <script src="https://unpkg.com/livekit-client/dist/livekit-client.umd.min.js"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Playfair+Display:wght@700;900&display=swap" rel="stylesheet">
   <style>
-    /* ─────────────────────────────────────────────────────────────
-       Design tokens
-       ───────────────────────────────────────────────────────────── */
+    /* Design tokens */
     :root {
       --bg-deep:      #0a0a14;
       --bg-surface:   #15151f;
@@ -62,7 +60,7 @@
       position: relative;
     }
 
-    /* Ambient backdrop — subtle radial wash so the dark feels intentional */
+    /* Ambient backdrop - subtle radial wash so the dark feels intentional */
     body::before {
       content: "";
       position: fixed;
@@ -77,9 +75,7 @@
 
     body > * { position: relative; z-index: 1; }
 
-    /* ─────────────────────────────────────────────────────────────
-       Header
-       ───────────────────────────────────────────────────────────── */
+    /* Header */
     #header {
       display: flex;
       align-items: center;
@@ -223,6 +219,17 @@
       background: rgba(239, 68, 68, 0.10);
       box-shadow: 0 0 14px rgba(239, 68, 68, 0.18);
     }
+    #share-btn:hover:not(:disabled) {
+      color: #93c5fd;
+      border-color: rgba(59, 130, 246, 0.55);
+      background: rgba(59, 130, 246, 0.10);
+      box-shadow: 0 0 14px rgba(59, 130, 246, 0.18);
+    }
+    body.sharing #share-btn {
+      color: #60a5fa;
+      border-color: rgba(59, 130, 246, 0.55);
+      background: rgba(59, 130, 246, 0.10);
+    }
 
     /* Paused overlay on the YOU panel */
     .paused-overlay {
@@ -279,9 +286,7 @@
       50%      { opacity: 0.45; }
     }
 
-    /* ─────────────────────────────────────────────────────────────
-       Main split — webcam + judge
-       ───────────────────────────────────────────────────────────── */
+    /* Main split: webcam + judge */
     #main {
       display: flex;
       flex: 1;
@@ -338,16 +343,14 @@
       box-shadow: 0 0 8px rgba(232, 184, 0, 0.7);
     }
 
-    /* ─────────────────────────────────────────────────────────────
-       YOU panel — webcam frame
-       ───────────────────────────────────────────────────────────── */
+    /* YOU panel: webcam frame */
     #user-side {
       background:
         radial-gradient(80% 60% at 50% 0%, rgba(59, 130, 246, 0.08), transparent 60%),
         var(--bg-surface);
     }
 
-    /* Camera frame — placeholder until TRTC injects <video> */
+    /* Camera frame - placeholder until LiveKit attaches <video> */
     #local-video {
       position: absolute;
       inset: 0;
@@ -381,7 +384,7 @@
       z-index: 0;
     }
 
-    /* TRTC injects a <video> inside this div — make it fill cleanly */
+    /* LiveKit attaches a <video> inside this div - make it fill cleanly */
     #local-video video {
       position: absolute;
       inset: 0;
@@ -435,9 +438,7 @@
       50%      { transform: scale(0.75); opacity: 0.55; }
     }
 
-    /* ─────────────────────────────────────────────────────────────
-       Confidence bar
-       ───────────────────────────────────────────────────────────── */
+    /* Confidence bar */
     #confidence-wrapper {
       position: absolute;
       bottom: 18px; left: 18px; right: 18px;
@@ -521,132 +522,208 @@
     }
     body.paused #scene-line { opacity: 0.3; }
 
-    /* ─────────────────────────────────────────────────────────────
-       JUDGE panel
-       ───────────────────────────────────────────────────────────── */
+    /* JUDGE panel: three-card lineup with active highlighting */
     #judge-panel {
-      align-items: center;
-      justify-content: center;
       background:
-        radial-gradient(70% 60% at 50% 35%, rgba(232, 184, 0, 0.10), transparent 65%),
-        radial-gradient(60% 60% at 50% 95%, rgba(0, 0, 0, 0.6), transparent 70%),
+        radial-gradient(70% 60% at 50% 18%, rgba(232, 184, 0, 0.08), transparent 65%),
+        radial-gradient(60% 60% at 50% 100%, rgba(0, 0, 0, 0.55), transparent 70%),
         var(--bg-surface);
+      padding: 56px 22px 22px;
     }
 
-    /* Spotlight ring behind the judge */
-    #judge-panel::after {
-      content: "";
-      position: absolute;
-      left: 50%;
-      top: 38%;
-      transform: translate(-50%, -50%);
-      width: 60%;
-      aspect-ratio: 1 / 1;
-      max-width: 480px;
-      border-radius: 50%;
-      background: radial-gradient(circle at center, rgba(232, 184, 0, 0.18), transparent 65%);
-      filter: blur(20px);
-      pointer-events: none;
-      z-index: 0;
-      animation: spotlightBreathe 6s ease-in-out infinite;
-    }
-    @keyframes spotlightBreathe {
-      0%, 100% { opacity: 0.65; transform: translate(-50%, -50%) scale(1); }
-      50%      { opacity: 1;    transform: translate(-50%, -50%) scale(1.05); }
-    }
-
-    #judge-img {
-      max-width: 78%;
-      max-height: 78%;
-      object-fit: contain;
-      transition: opacity 280ms var(--ease-out), transform 280ms var(--ease-out), filter 280ms var(--ease-out);
-      image-rendering: pixelated;
+    .judges-row {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      width: 100%;
       position: relative;
       z-index: 2;
-      filter: drop-shadow(0 24px 48px rgba(0, 0, 0, 0.6)) drop-shadow(0 0 30px rgba(232, 184, 0, 0.18));
-      animation: judgeFloat 5s ease-in-out infinite;
     }
-    @keyframes judgeFloat {
-      0%, 100% { transform: translateY(0); }
-      50%      { transform: translateY(-6px); }
+
+    .judge-card {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      padding: 12px;
+      border-radius: var(--radius-md);
+      border: 1px solid var(--border-soft);
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0.0)),
+        rgba(10, 10, 20, 0.45);
+      opacity: 0.45;
+      filter: grayscale(0.4);
+      transform: scale(1);
+      transition:
+        opacity 320ms var(--ease-out),
+        filter 320ms var(--ease-out),
+        transform 320ms var(--ease-out),
+        border-color 320ms var(--ease-out),
+        box-shadow 320ms var(--ease-out),
+        background 320ms var(--ease-out);
     }
-    #judge-img.swap {
+
+    .judge-card.active {
+      opacity: 1;
+      filter: grayscale(0);
+      transform: scale(1.02);
+      border-color: rgba(232, 184, 0, 0.45);
+      box-shadow: 0 0 24px rgba(232, 184, 0, 0.35);
+      background:
+        linear-gradient(180deg, rgba(232, 184, 0, 0.06), rgba(255, 255, 255, 0.0)),
+        rgba(14, 14, 24, 0.55);
+    }
+
+    .judge-card.active[data-judge="cuban"]    { border-color: var(--judge-cuban); }
+    .judge-card.active[data-judge="oleary"]   { border-color: var(--judge-oleary); }
+    .judge-card.active[data-judge="corcoran"] { border-color: var(--judge-corcoran); }
+
+    .judge-card.speaking {
+      animation: judgeCardPulse 1.8s ease-in-out infinite;
+    }
+    @keyframes judgeCardPulse {
+      0%, 100% { box-shadow: 0 0 22px rgba(232, 184, 0, 0.30); }
+      50%      { box-shadow: 0 0 38px rgba(232, 184, 0, 0.55); }
+    }
+
+    .judge-card-frame {
+      position: relative;
+      flex: 1;
+      min-height: 0;
+      border-radius: var(--radius-sm);
+      overflow: hidden;
+      background: rgba(0, 0, 0, 0.35);
+    }
+
+    .judge-card-img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+      image-rendering: pixelated;
+    }
+
+    /* LemonSlice live avatar video. Sized exactly like .judge-card-img so it
+       slots into the active judge card without shifting any layout. Hidden
+       by default; the JS reveals it when a remote video track is attached. */
+    .judge-video {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      display: block;
+      z-index: 2;
+      background: transparent;
       opacity: 0;
-      transform: translateY(-10px) scale(0.97);
+      transition: opacity 280ms var(--ease-out);
+      pointer-events: none;
     }
-    #judge-img.talking {
-      filter:
-        drop-shadow(0 24px 48px rgba(0, 0, 0, 0.6))
-        drop-shadow(0 0 32px rgba(232, 184, 0, 0.55));
-    }
-
-    #judge-name-overlay {
-      position: absolute;
-      bottom: 96px; left: 0; right: 0;
-      text-align: center;
-      font-family: 'Playfair Display', Georgia, serif;
-      font-size: 1.6rem;
-      font-weight: 700;
-      letter-spacing: 0.01em;
-      color: var(--text-primary);
-      text-shadow: 0 4px 24px rgba(0, 0, 0, 0.9);
-      z-index: 10;
-      padding: 0 24px;
-    }
-    #judge-subtitle {
-      position: absolute;
-      bottom: 64px; left: 0; right: 0;
-      text-align: center;
-      font-size: 0.7rem;
-      color: var(--gold);
-      letter-spacing: 0.38em;
-      text-transform: uppercase;
-      font-weight: 600;
-      z-index: 10;
-      padding: 0 24px;
-    }
-    #judge-subtitle::before,
-    #judge-subtitle::after {
-      content: "";
-      display: inline-block;
-      vertical-align: middle;
-      width: 18px;
-      height: 1px;
-      background: var(--gold-dim);
-      margin: 0 12px;
+    .judge-video.has-stream {
+      opacity: 1;
+      background: #000;
     }
 
-    /* On-air badge near the judge */
-    .on-air {
+    /* Transient status overlay used for INTERRUPTED / INCOMING labels. */
+    .judge-card-overlay {
       position: absolute;
-      top: 18px; right: 18px;
-      z-index: 12;
-      display: inline-flex;
+      inset: 0;
+      display: flex;
       align-items: center;
-      gap: 8px;
-      padding: 6px 12px;
-      background: rgba(10, 10, 20, 0.55);
-      backdrop-filter: blur(8px);
-      -webkit-backdrop-filter: blur(8px);
-      border: 1px solid var(--gold-dim);
-      border-radius: 999px;
+      justify-content: center;
+      pointer-events: none;
+      z-index: 4;
+      font-size: 0.72rem;
+      font-weight: 800;
+      letter-spacing: 0.32em;
       color: var(--gold);
-      font-size: 0.62rem;
-      font-weight: 700;
-      letter-spacing: 0.28em;
       text-transform: uppercase;
+      opacity: 0;
+      transition: opacity 220ms var(--ease-out);
+      background: rgba(5, 5, 12, 0.55);
+      backdrop-filter: blur(3px);
+      -webkit-backdrop-filter: blur(3px);
+      text-shadow: 0 2px 14px rgba(0, 0, 0, 0.7);
     }
-    .on-air-dot {
-      width: 7px; height: 7px;
+    .judge-card-overlay.interrupted { opacity: 1; }
+
+    .judge-card-onair,
+    .judge-card-thinking {
+      position: absolute;
+      top: 8px; right: 8px;
+      display: none;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 9px;
+      border-radius: 999px;
+      font-size: 0.55rem;
+      font-weight: 700;
+      letter-spacing: 0.24em;
+      text-transform: uppercase;
+      background: rgba(10, 10, 20, 0.7);
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+      z-index: 3;
+    }
+    .judge-card-onair {
+      color: var(--gold);
+      border: 1px solid rgba(232, 184, 0, 0.55);
+    }
+    .judge-card-onair::before {
+      content: "";
+      width: 6px; height: 6px;
       border-radius: 50%;
       background: var(--gold);
-      box-shadow: 0 0 10px var(--gold);
+      box-shadow: 0 0 8px var(--gold);
       animation: micPulse 1.8s ease-in-out infinite;
     }
+    .judge-card-thinking {
+      color: #c7d2fe;
+      border: 1px solid rgba(165, 180, 252, 0.4);
+    }
 
-    /* ─────────────────────────────────────────────────────────────
-       Transcript panel
-       ───────────────────────────────────────────────────────────── */
+    .judge-card.active .judge-card-onair { display: inline-flex; }
+    .judge-card.speaking:not(.active) .judge-card-thinking { display: inline-flex; }
+
+    .judge-card-meta {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      padding: 0 2px;
+    }
+    .judge-card-name {
+      font-family: 'Playfair Display', Georgia, serif;
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: var(--text-primary);
+      letter-spacing: 0.005em;
+      line-height: 1.15;
+    }
+    .judge-card.active .judge-card-name {
+      color: var(--gold);
+    }
+    .judge-card-subtitle {
+      font-size: 0.58rem;
+      color: var(--text-muted);
+      letter-spacing: 0.24em;
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+
+    @media (min-width: 1200px) {
+      .judges-row {
+        flex-direction: row;
+        align-items: stretch;
+      }
+      .judge-card {
+        flex: 1 1 0;
+      }
+    }
+
+    /* Transcript panel */
     #transcript-panel {
       flex-shrink: 0;
       height: 200px;
@@ -754,9 +831,7 @@
       letter-spacing: 0.005em;
     }
 
-    /* ─────────────────────────────────────────────────────────────
-       Setup overlay
-       ───────────────────────────────────────────────────────────── */
+    /* Setup overlay */
     #setup-screen,
     #goodbye-screen {
       position: fixed; inset: 0;
@@ -872,8 +947,29 @@
     .setup-helper {
       color: var(--text-muted);
       font-size: 0.78rem;
-      margin-bottom: 28px;
+      margin-bottom: 22px;
       line-height: 1.55;
+    }
+    .setup-judge-line {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 0.7rem;
+      font-weight: 600;
+      letter-spacing: 0.18em;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      margin-bottom: 22px;
+      padding: 8px 16px;
+      border: 1px solid var(--border-soft);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.02);
+    }
+    .setup-judge-line .setup-judge-name {
+      color: var(--gold);
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: none;
     }
     #setup-error  {
       color: #fca5a5;
@@ -942,14 +1038,15 @@
       background: var(--text-faint);
     }
 
-    /* ─────────────────────────────────────────────────────────────
-       Responsive degradation
-       ───────────────────────────────────────────────────────────── */
+    /* Responsive degradation */
     @media (max-width: 900px) {
       #main { flex-direction: column; gap: 12px; padding: 12px; }
       #transcript-panel { height: 160px; margin: 0 12px 12px; }
-      #judge-name-overlay { font-size: 1.3rem; bottom: 80px; }
-      #judge-subtitle { bottom: 54px; }
+      #judge-panel { padding: 48px 16px 16px; }
+      .judges-row { flex-direction: row; gap: 10px; }
+      .judge-card { padding: 8px; gap: 6px; }
+      .judge-card-name { font-size: 0.78rem; }
+      .judge-card-subtitle { font-size: 0.52rem; letter-spacing: 0.18em; }
       #header { padding: 12px 16px; gap: 12px; flex-wrap: wrap; }
       #header h1 { font-size: 1.1rem; }
       #header h1 .title-sub { display: none; }
@@ -974,11 +1071,15 @@
     <h2><span class="setup-gold">Shark Tank</span> Simulator</h2>
     <p id="setup-msg">Connecting to the pitch room...</p>
     <p class="setup-helper">Browser will ask for camera and microphone access.</p>
+    <div class="setup-judge-line">
+      <span>Judge</span>
+      <span class="setup-judge-name" id="setup-judge-name">Mark Cuban</span>
+    </div>
     <button class="btn" id="join-btn" disabled>Join Pitch Room</button>
     <div id="setup-error"></div>
     <div class="setup-foot">
       <span class="foot-dot"></span>
-      <span>Powered by TRTC + Gemini Live</span>
+      <span>Powered by LiveKit + Gemini Live</span>
       <span class="foot-dot"></span>
     </div>
   </div>
@@ -993,10 +1094,11 @@
     <span class="title-sub">Pitch Room</span>
   </h1>
   <div id="status-bar">
-    <span class="status-pill"><span class="dot" id="trtc-dot"></span><span id="trtc-label">TRTC</span></span>
+    <span class="status-pill"><span class="dot" id="rtc-dot"></span><span id="rtc-label">LIVEKIT</span></span>
     <span class="status-pill"><span class="dot" id="ws-dot"></span><span id="ws-label">WebSocket</span></span>
-    <span id="room-info">—</span>
+    <span id="room-info">--</span>
     <button type="button" class="header-action" id="pause-btn" disabled>Pause</button>
+    <button type="button" class="header-action" id="share-btn" disabled>Share Screen</button>
     <button type="button" class="header-action" id="exit-btn" disabled>Exit</button>
   </div>
 </div>
@@ -1023,21 +1125,54 @@
         </div>
         <div id="confidence-pct">50%</div>
       </div>
-      <div id="scene-line">—</div>
+      <div id="scene-line">--</div>
     </div>
   </div>
 
-  <!-- Right: judge -->
+  <!-- Right: judges lineup (all 3 visible, active one highlighted) -->
   <div class="panel" id="judge-panel">
-    <div class="panel-label"><span class="panel-label-dot"></span>The Judge</div>
-    <div class="on-air"><span class="on-air-dot"></span>On Air</div>
-    <img id="judge-img" src="/assets/judges/cuban-idle.png" alt="Mark Cuban">
-    <div id="judge-name-overlay">Mark Cuban</div>
-    <div id="judge-subtitle">Shark</div>
+    <div class="panel-label"><span class="panel-label-dot"></span>The Judges</div>
+    <div id="judges-row" class="judges-row">
+      <div class="judge-card active" id="judge-card-cuban" data-judge="cuban">
+        <div class="judge-card-frame">
+          <img class="judge-card-img" id="judge-img" src="/assets/judges/cuban.png" alt="Mark Cuban">
+          <video class="judge-video" id="judge-video" autoplay playsinline></video>
+          <div class="judge-card-onair">On Air</div>
+          <div class="judge-card-thinking">Thinking</div>
+          <div class="judge-card-overlay" id="judge-status-overlay"></div>
+        </div>
+        <div class="judge-card-meta">
+          <div class="judge-card-name">Mark Cuban</div>
+          <div class="judge-card-subtitle">Dallas Mavericks</div>
+        </div>
+      </div>
+      <div class="judge-card" id="judge-card-oleary" data-judge="oleary">
+        <div class="judge-card-frame">
+          <img class="judge-card-img" src="/assets/judges/oleary.png" alt="Kevin O'Leary">
+          <div class="judge-card-onair">On Air</div>
+          <div class="judge-card-thinking">Thinking</div>
+        </div>
+        <div class="judge-card-meta">
+          <div class="judge-card-name">Kevin O'Leary</div>
+          <div class="judge-card-subtitle">Mr. Wonderful</div>
+        </div>
+      </div>
+      <div class="judge-card" id="judge-card-corcoran" data-judge="corcoran">
+        <div class="judge-card-frame">
+          <img class="judge-card-img" src="/assets/judges/corcoran.png" alt="Barbara Corcoran">
+          <div class="judge-card-onair">On Air</div>
+          <div class="judge-card-thinking">Thinking</div>
+        </div>
+        <div class="judge-card-meta">
+          <div class="judge-card-name">Barbara Corcoran</div>
+          <div class="judge-card-subtitle">Real Estate Mogul</div>
+        </div>
+      </div>
+    </div>
   </div>
 </div>
 
-<!-- Hidden audio sink for TRTC remote stream playback -->
+<!-- Hidden audio sink for LiveKit remote audio playback -->
 <div id="remote-audio" style="display:none"></div>
 
 <!-- Goodbye overlay shown after Exit -->
@@ -1048,7 +1183,7 @@
     <p class="goodbye-msg">Session ended. Refresh to start over.</p>
     <div class="setup-foot">
       <span class="foot-dot"></span>
-      <span>Powered by TRTC + Gemini Live</span>
+      <span>Powered by LiveKit + Gemini Live</span>
       <span class="foot-dot"></span>
     </div>
   </div>
@@ -1063,65 +1198,75 @@
 </div>
 
 <script>
-// ---------------------------------------------------------------------------
 // Config
-// ---------------------------------------------------------------------------
-const urlParams = new URLSearchParams(window.location.search);
-const ROOM_ID   = parseInt(urlParams.get('room_id') || '0', 10);
-const WS_URL    = `ws://${location.hostname}:8000/ws`;
-const API_BASE  = `http://${location.hostname}:8000`;
+const urlParams   = new URLSearchParams(window.location.search);
+const ROOM        = urlParams.get('room') || 'demo';
+const JUDGE_PARAM = (urlParams.get('judge') || 'cuban').toLowerCase();
+const WS_URL      = `ws://${location.hostname}:8000/ws`;
+const API_BASE    = `http://${location.hostname}:8000`;
 
 const JUDGE_INFO = {
   cuban:    { name: 'Mark Cuban',         subtitle: 'Dallas Mavericks',  img: '/assets/judges/cuban-idle.png',    talking: '/assets/judges/cuban-talking.png'    },
   oleary:   { name: "Kevin O'Leary",      subtitle: 'Mr. Wonderful',     img: '/assets/judges/oleary-idle.png',   talking: '/assets/judges/oleary-talking.png'   },
   corcoran: { name: 'Barbara Corcoran',   subtitle: 'Real Estate Mogul', img: '/assets/judges/corcoran-idle.png', talking: '/assets/judges/corcoran-talking.png' },
 };
+const SELECTED_JUDGE = JUDGE_INFO[JUDGE_PARAM] ? JUDGE_PARAM : 'cuban';
 
-// ---------------------------------------------------------------------------
 // State
-// ---------------------------------------------------------------------------
-let trtc          = null;
-let localStream   = null;
-let ws            = null;
-let currentJudge  = 'cuban';
-let trtcReady     = false;
-let wsReady       = false;
-let isPaused      = false;
-let moodIntervalId = null;
-let moodCanvas    = null;
-let sessionEnded  = false;
+let room = null, localTracks = [], screenTrack = null, sharingScreen = false;
+let ws = null, currentJudge = SELECTED_JUDGE, rtcReady = false, wsReady = false;
+let isPaused = false, sessionEnded = false;
+let moodIntervalId = null, moodCanvas = null;
+let judgeVideoStreamActive = false, judgeAudioEl = null;
 
-// ---------------------------------------------------------------------------
+// Transcript accumulator: consecutive deltas from the same speaker append
+// into one line. A line closes on speaker change, ~1.2s silence, final mode,
+// or speaking_end.
+let activeTranscriptLine = null, activeTranscriptKey = null, activeTranscriptTimer = null;
+const TRANSCRIPT_SILENCE_MS = 1200;
+
 // DOM refs
-// ---------------------------------------------------------------------------
 const setupScreen    = document.getElementById('setup-screen');
 const setupMsg       = document.getElementById('setup-msg');
 const setupError     = document.getElementById('setup-error');
+const setupJudgeName = document.getElementById('setup-judge-name');
 const joinBtn        = document.getElementById('join-btn');
-const trtcDot        = document.getElementById('trtc-dot');
-const trtcLabel      = document.getElementById('trtc-label');
+const rtcDot         = document.getElementById('rtc-dot');
+const rtcLabel       = document.getElementById('rtc-label');
 const wsDot          = document.getElementById('ws-dot');
 const wsLabel        = document.getElementById('ws-label');
 const roomInfo       = document.getElementById('room-info');
-const judgeImg       = document.getElementById('judge-img');
-const judgeNameEl    = document.getElementById('judge-name-overlay');
-const judgeSubtitle  = document.getElementById('judge-subtitle');
+const judgeCardEls   = {
+  cuban:    document.getElementById('judge-card-cuban'),
+  oleary:   document.getElementById('judge-card-oleary'),
+  corcoran: document.getElementById('judge-card-corcoran'),
+};
+const judgeVideoEl   = document.getElementById('judge-video');
 const confidenceBar  = document.getElementById('confidence');
 const confidencePct  = document.getElementById('confidence-pct');
 const transcriptLog  = document.getElementById('transcript-log');
 const pauseBtn       = document.getElementById('pause-btn');
 const exitBtn        = document.getElementById('exit-btn');
+const shareBtn       = document.getElementById('share-btn');
+const remoteAudioSink = document.getElementById('remote-audio');
 
-// ---------------------------------------------------------------------------
-// Setup check
-// ---------------------------------------------------------------------------
-if (!ROOM_ID) {
-  setupMsg.textContent = 'No room ID in URL. Start the backend first — it will print the URL to open.';
-  setupError.textContent = 'Expected: http://localhost:8000/?room_id=XXXXXXXXXX';
-} else {
-  setupMsg.textContent = `Room ${ROOM_ID} — click to join.`;
+(function initSetupPanel() {
+  const info = JUDGE_INFO[SELECTED_JUDGE];
+  if (setupJudgeName) setupJudgeName.textContent = info.name;
+  // Reflect the chosen judge as the initial active card so the visible UI
+  // matches what the backend will route to.
+  for (const k of Object.keys(judgeCardEls)) {
+    const el = judgeCardEls[k];
+    if (el) el.classList.toggle('active', k === SELECTED_JUDGE);
+  }
+  if (!ROOM) {
+    setupMsg.textContent = 'No room name in URL. Pass ?room=<name> to join a LiveKit room.';
+    setupError.textContent = 'Expected: http://localhost:8000/?room=demo&judge=cuban';
+    return;
+  }
+  setupMsg.textContent = `Room "${ROOM}", click to join.`;
   joinBtn.disabled = false;
-}
+})();
 
 joinBtn.addEventListener('click', () => {
   joinBtn.disabled = true;
@@ -1130,102 +1275,175 @@ joinBtn.addEventListener('click', () => {
   startSession();
 });
 
-// ---------------------------------------------------------------------------
-// TRTC
-// ---------------------------------------------------------------------------
+// LiveKit connect + publish
 async function startSession() {
   try {
-    // Fetch founder credentials from backend
-    const res = await fetch(`${API_BASE}/credentials?room_id=${ROOM_ID}`);
-    if (!res.ok) throw new Error(`/credentials returned ${res.status}`);
-    const creds = await res.json();
-    if (creds.error) throw new Error(creds.error);
+    if (!window.LivekitClient) {
+      throw new Error('LiveKit JS SDK failed to load.');
+    }
+    const { Room, RoomEvent, Track, ConnectionState, createLocalTracks } = LivekitClient;
 
-    setupMsg.textContent = 'Credentials obtained — joining TRTC room...';
+    // Stable per-tab identity for the founder participant.
+    const identity = `founder-${randomId()}`;
 
-    // Extract into named locals before createClient
-    const sdkAppId = creds.sdk_app_id;
-    const userId   = creds.user_id;
-    const userSig  = creds.user_sig;
+    // Fetch the LiveKit access token from the backend.
+    setupMsg.textContent = 'Fetching access token...';
+    const tokenUrl = `${API_BASE}/token?room=${encodeURIComponent(ROOM)}`
+      + `&identity=${encodeURIComponent(identity)}`
+      + `&judge_key=${encodeURIComponent(SELECTED_JUDGE)}`;
+    const res = await fetch(tokenUrl);
+    if (!res.ok) throw new Error(`/token returned ${res.status}`);
+    const payload = await res.json();
+    if (payload.error) throw new Error(payload.error);
+    const token  = payload.token;
+    const wsHost = payload.url || payload.ws_url;
+    if (!token || !wsHost) throw new Error('Token response missing token or url');
 
-    // v4 SDK: createClient takes sdkAppId/userId/userSig, join takes roomId
-    trtc = TRTC.createClient({ mode: 'rtc', sdkAppId, userId, userSig });
+    setupMsg.textContent = 'Connecting to LiveKit room...';
 
-    // Wire handlers BEFORE join
-    trtc.on('stream-added', (event) => {
-      // Subscribe to both audio and video from the agent so the judge's
-      // voice plays in the browser. The agent's video track is empty
-      // today but subscribing is harmless and forward-compatible.
-      trtc.subscribe(event.stream, { audio: true, video: true });
+    // Create the Room with single-layer publishing to keep latency low.
+    room = new Room({
+      adaptiveStream: true,
+      dynacast: true,
+      publishDefaults: { videoSimulcastLayers: [], videoSimulcast: false },
     });
 
-    trtc.on('stream-subscribed', (event) => {
-      // Play the agent's stream into the hidden sink so Mark Cuban talks.
-      event.stream.play('remote-audio');
-      console.log('Agent stream playing, id:', event.stream.getId());
+    // Wire remote-track handlers BEFORE connecting so we never miss the
+    // first SubscriptionEvent from the agent / avatar participant.
+    room.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
+      // Ignore any echo of our own published media if the SFU loops it back.
+      if (participant && participant.identity && participant.identity.startsWith('founder-')) return;
+
+      if (track.kind === Track.Kind.Video) {
+        try { track.attach(judgeVideoEl); }
+        catch (e) { console.warn('Failed to attach remote video:', e); }
+        judgeVideoStreamActive = true;
+        judgeVideoEl.classList.add('has-stream');
+        document.body.classList.add('has-judge-video');
+      } else if (track.kind === Track.Kind.Audio) {
+        // Pipe judge voice into the hidden audio sink so the user hears it.
+        try {
+          const el = track.attach();
+          el.autoplay = true;
+          el.playsInline = true;
+          if (isPaused) el.muted = true;
+          remoteAudioSink.appendChild(el);
+          judgeAudioEl = el;
+        } catch (e) {
+          console.warn('Failed to attach remote audio:', e);
+        }
+      }
     });
 
-    trtc.on('stream-removed', (event) => {
-      event.stream.stop();
+    room.on(RoomEvent.TrackUnsubscribed, (track) => {
+      try {
+        const elements = track.detach();
+        if (Array.isArray(elements)) {
+          elements.forEach((el) => el && el.remove && el.remove());
+        }
+      } catch (e) {
+        console.warn('Detach error:', e);
+      }
+      if (track.kind === LivekitClient.Track.Kind.Video) {
+        judgeVideoStreamActive = false;
+        judgeVideoEl.classList.remove('has-stream');
+        document.body.classList.remove('has-judge-video');
+      }
+      if (judgeAudioEl && track.kind === LivekitClient.Track.Kind.Audio) {
+        judgeAudioEl = null;
+      }
     });
 
-    trtc.on('error', (error) => {
-      console.error('TRTC error:', error);
-      setTrtcStatus('red', 'TRTC Error');
+    room.on(RoomEvent.ParticipantConnected, (participant) => {
+      console.log('Participant connected:', participant.identity);
     });
 
-    // Join the room first
-    await trtc.join({ roomId: ROOM_ID });
+    room.on(RoomEvent.ParticipantDisconnected, (participant) => {
+      console.log('Participant disconnected:', participant.identity);
+    });
 
-    // Publish local mic + webcam so Gemini Live can (a) hear the pitch
-    // for the user-speech-end events and (b) read facial expressions at
-    // fps=3 for mood. Without this the agent loops its opening line
-    // because it never detects a user turn ending.
+    room.on(RoomEvent.Disconnected, () => {
+      rtcReady = false;
+      if (!sessionEnded) setRtcStatus('red', 'LIVEKIT OFFLINE');
+    });
+
+    room.on(RoomEvent.ConnectionStateChanged, (state) => {
+      if (state === ConnectionState.Connected) {
+        rtcReady = true;
+        setRtcStatus('green', `LIVEKIT · ${ROOM}`);
+      } else if (state === ConnectionState.Reconnecting) {
+        setRtcStatus('yellow', 'RECONNECTING');
+      } else if (state === ConnectionState.Disconnected) {
+        rtcReady = false;
+        if (!sessionEnded) setRtcStatus('red', 'LIVEKIT OFFLINE');
+      }
+    });
+
+    // Connect to the LiveKit room.
+    await room.connect(wsHost, token);
+    rtcReady = true;
+    setRtcStatus('green', `LIVEKIT · ${ROOM}`);
+    roomInfo.textContent = `Room ${ROOM}`;
+
+    // Request mic + camera at 640x360 / 24fps. Single-layer publishing keeps
+    // the upload bandwidth tight so the agent gets the headroom it needs to
+    // talk back without buffering.
     setupMsg.textContent = 'Requesting camera + microphone access...';
-    localStream = TRTC.createStream({
+    localTracks = await createLocalTracks({
       audio: true,
-      video: true,
-      userId,
+      video: { resolution: { width: 640, height: 360, frameRate: 24 } },
     });
-    // Bias the codec toward low-latency speech. 'standard' = Opus 16kHz mono
-    // (vs 'music' which uses higher bitrate and bigger buffers). 360p video
-    // at modest bitrate keeps the publish path lean so Gemini's response
-    // path gets the bandwidth headroom.
-    try { localStream.setAudioProfile('standard'); } catch (e) {}
-    try { localStream.setVideoProfile('360p'); } catch (e) {}
-    await localStream.initialize();
-    localStream.play('local-video');
-    await trtc.publish(localStream);
-    console.log('Local mic + webcam published, id:', localStream.getId());
 
-    trtcReady = true;
-    setTrtcStatus('green', `TRTC · ${ROOM_ID}`);
-    roomInfo.textContent = `Room ${ROOM_ID}`;
+    for (const t of localTracks) {
+      await room.localParticipant.publishTrack(t);
+    }
 
-    // Enable header controls now that publish succeeded
+    // Attach local video to the YOU panel.
+    const videoTrack = localTracks.find((t) => t.kind === Track.Kind.Video);
+    if (videoTrack) {
+      const localContainer = document.getElementById('local-video');
+      try {
+        const el = videoTrack.attach();
+        el.autoplay = true;
+        el.playsInline = true;
+        el.muted = true;
+        localContainer.appendChild(el);
+      } catch (e) {
+        console.warn('Local video attach error:', e);
+      }
+    }
+
     pauseBtn.disabled = false;
     exitBtn.disabled  = false;
+    shareBtn.disabled = false;
 
-    // Begin periodic mood frame capture from the injected <video>
+    // Begin periodic mood frame capture from the injected <video>.
     startMoodCapture();
 
-    // Hide setup overlay
+    // Hide setup overlay.
     setupScreen.style.display = 'none';
 
-    // Connect websocket
-    connectWebSocket();
+    // Connect websocket if it isn't already open.
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      connectWebSocket();
+    }
 
   } catch (err) {
     joinBtn.disabled = false;
     joinBtn.textContent = 'Retry';
-    setupError.textContent = `Error: ${err.message}`;
+    setupError.textContent = `Error: ${err && err.message ? err.message : err}`;
     console.error(err);
   }
 }
 
-// ---------------------------------------------------------------------------
-// WebSocket
-// ---------------------------------------------------------------------------
+function randomId() {
+  if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+    return window.crypto.randomUUID().slice(0, 8);
+  }
+  return Math.random().toString(36).slice(2, 10);
+}
+
+// WebSocket (unchanged protocol with /ws backend)
 function connectWebSocket() {
   ws = new WebSocket(WS_URL);
 
@@ -1244,6 +1462,7 @@ function connectWebSocket() {
   };
 
   ws.onclose = () => {
+    if (sessionEnded) return;
     wsReady = false;
     setWsStatus('yellow', 'Reconnecting...');
     setTimeout(connectWebSocket, 2000);
@@ -1254,33 +1473,29 @@ function connectWebSocket() {
   };
 }
 
-// ---------------------------------------------------------------------------
 // Message handlers
-// ---------------------------------------------------------------------------
 function handleMessage(msg) {
   switch (msg.type) {
 
     case 'room_ready':
-      // Backend just announced the room — useful if WS connected before we joined
-      console.log('room_ready from backend:', msg.room_id);
+      console.log('room_ready from backend:', msg.room_id || msg.room);
       break;
 
     case 'judge':
-      // User finished speaking; next judge is about to respond
       swapJudge(msg.judge);
       setConfidence(msg.mood);
       break;
 
     case 'transcript':
-      // Agent finished speaking; append transcript line
-      appendTranscript(msg.judge, msg.text);
+      // Streaming transcript delta from the agent (or final-mode summary).
+      // appendTranscript handles per-speaker accumulation into one line.
+      appendTranscript(msg.judge, msg.text, msg.mode);
       setConfidence(msg.mood);
       break;
 
     case 'mood_update':
-      // Per-frame mood + scene update from the browser-side capture loop
       setConfidence(msg.mood);
-      document.getElementById('scene-line').textContent = msg.scene || '—';
+      document.getElementById('scene-line').textContent = msg.scene || '--';
       break;
 
     case 'speaking_start':
@@ -1289,100 +1504,120 @@ function handleMessage(msg) {
 
     case 'speaking_end':
       setJudgeTalking(msg.judge, false);
+      closeActiveLine();
       break;
 
     case 'judge_interrupted':
-      // User cut the judge off mid-sentence. Flash the interrupted state
-      // briefly so the founder sees their interruption registered.
       setJudgeTalking(msg.judge, false);
-      const ovl = document.getElementById('judge-status-overlay');
-      if (ovl) {
-        ovl.textContent = 'INTERRUPTED';
-        ovl.classList.add('interrupted');
-        setTimeout(() => {
-          ovl.classList.remove('interrupted');
-          ovl.textContent = '';
-        }, 900);
-      }
+      flashJudgeOverlay('INTERRUPTED', 900);
       break;
 
-    case 'judge_switching':
-      // Backend is closing the current Gemini session and reconnecting
-      // with the next judge's voice + system prompt. ~500ms-1s gap.
-      // Pre-emptively swap the visible portrait so the user sees who's
-      // coming on next instead of staring at the previous judge in silence.
+    case 'judge_switching': {
+      // Backend is closing the current Gemini session and reconnecting with
+      // the next judge's voice + system prompt (~500ms-1s gap). Preemptively
+      // promote the next card so the user sees who's coming on next.
       swapJudge(msg.to);
       setJudgeTalking(msg.to, false);
-      const switchOvl = document.getElementById('judge-status-overlay');
-      if (switchOvl) {
-        const nextName = (JUDGE_INFO[msg.to] && JUDGE_INFO[msg.to].name) || msg.to;
-        switchOvl.textContent = nextName.toUpperCase() + ' INCOMING';
-        switchOvl.classList.add('interrupted');
-        setTimeout(() => {
-          switchOvl.classList.remove('interrupted');
-          switchOvl.textContent = '';
-        }, 1400);
-      }
+      const nextName = (JUDGE_INFO[msg.to] && JUDGE_INFO[msg.to].name) || msg.to || '';
+      flashJudgeOverlay(`${nextName.toUpperCase()} INCOMING`, 1400);
       break;
+    }
   }
 }
 
-// ---------------------------------------------------------------------------
-// UI updates
-// ---------------------------------------------------------------------------
+// UI updates. All three judges stay on stage; .active highlights the speaker.
 function swapJudge(key) {
-  if (key === currentJudge) return;
-  const info = JUDGE_INFO[key];
-  if (!info) return;
+  if (!key || !JUDGE_INFO[key]) return;
   currentJudge = key;
-
-  judgeImg.classList.add('swap');
-  setTimeout(() => {
-    judgeImg.src          = info.img;
-    judgeNameEl.textContent = info.name;
-    judgeSubtitle.textContent = info.subtitle;
-    judgeImg.classList.remove('swap');
-    judgeImg.classList.remove('talking');
-  }, 200);
+  for (const k of Object.keys(judgeCardEls)) {
+    const el = judgeCardEls[k];
+    if (!el) continue;
+    el.classList.toggle('active', k === key);
+  }
 }
 
 function setJudgeTalking(key, talking) {
-  const info = JUDGE_INFO[key];
-  if (!info) return;
-  const target = talking ? info.talking : info.img;
-  if (judgeImg.src.endsWith(target)) return;
-  judgeImg.src = target;
-  judgeImg.classList.toggle('talking', !!talking);
+  if (!key || !JUDGE_INFO[key]) return;
+  const el = judgeCardEls[key];
+  if (!el) return;
+  el.classList.toggle('speaking', !!talking);
 }
 
 function setConfidence(mood) {
   if (typeof mood !== 'number') return;
-  confidenceBar.value   = mood;
+  confidenceBar.value = mood;
   confidencePct.textContent = `${Math.round(mood * 100)}%`;
 }
 
-function appendTranscript(speakerKey, text) {
-  if (!text) return;
+function appendTranscript(speakerKey, text, mode) {
+  const delta = (text || '').replace(/^\s+|\s+$/g, '');
+  if (!delta) {
+    if (mode === 'final') closeActiveLine();
+    return;
+  }
+
   const info     = JUDGE_INFO[speakerKey];
-  const name     = info ? info.name : speakerKey;
+  const name     = info ? info.name : (speakerKey || 'Founder');
   const cssClass = info ? `judge-${speakerKey}` : 'founder';
 
-  const line = document.createElement('div');
-  line.className = 'tx-line';
-  line.innerHTML =
-    `<span class="tx-speaker ${cssClass}">${escHtml(name)}</span>` +
-    `<span class="tx-text">${escHtml(text)}</span>`;
-  transcriptLog.appendChild(line);
+  if (activeTranscriptKey !== speakerKey || activeTranscriptLine === null) {
+    closeActiveLine();
+    const line = document.createElement('div');
+    line.className = 'tx-line';
+    line.innerHTML =
+      `<span class="tx-speaker ${cssClass}">${escHtml(name)}</span>` +
+      `<span class="tx-text">${escHtml(delta)}</span>`;
+    transcriptLog.appendChild(line);
+    activeTranscriptLine = line;
+    activeTranscriptKey  = speakerKey;
+  } else {
+    const textEl = activeTranscriptLine.querySelector('.tx-text');
+    if (textEl) {
+      const prev    = textEl.textContent || '';
+      const lastCh  = prev.slice(-1);
+      const firstCh = delta.charAt(0);
+      const needsSpace = prev.length > 0
+        && !/\s/.test(lastCh)
+        && !/[.,!?;:)\]\}]/.test(firstCh);
+      textEl.textContent = prev + (needsSpace ? ' ' : '') + delta;
+    }
+  }
+
   transcriptLog.scrollTop = transcriptLog.scrollHeight;
+
+  if (activeTranscriptTimer) clearTimeout(activeTranscriptTimer);
+  if (mode === 'final') {
+    closeActiveLine();
+  } else {
+    activeTranscriptTimer = setTimeout(closeActiveLine, TRANSCRIPT_SILENCE_MS);
+  }
+}
+
+function closeActiveLine() {
+  if (activeTranscriptTimer) clearTimeout(activeTranscriptTimer);
+  activeTranscriptTimer = null;
+  activeTranscriptLine  = null;
+  activeTranscriptKey   = null;
+}
+
+function flashJudgeOverlay(text, ms) {
+  const ovl = document.getElementById('judge-status-overlay');
+  if (!ovl) return;
+  ovl.textContent = text;
+  ovl.classList.add('interrupted');
+  setTimeout(() => {
+    ovl.classList.remove('interrupted');
+    ovl.textContent = '';
+  }, ms);
 }
 
 function escHtml(str) {
-  return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-function setTrtcStatus(state, label) {
-  trtcDot.className = `dot ${state}`;
-  trtcLabel.textContent = label;
+function setRtcStatus(state, label) {
+  rtcDot.className = `dot ${state}`;
+  rtcLabel.textContent = label;
 }
 
 function setWsStatus(state, label) {
@@ -1390,30 +1625,25 @@ function setWsStatus(state, label) {
   wsLabel.textContent = label;
 }
 
-// ---------------------------------------------------------------------------
 // Pause / Resume
-// ---------------------------------------------------------------------------
-pauseBtn.addEventListener('click', () => {
-  if (!localStream || sessionEnded) return;
+pauseBtn.addEventListener('click', async () => {
+  if (!room || sessionEnded) return;
   isPaused = !isPaused;
   try {
-    if (isPaused) {
-      localStream.muteAudio();
-      localStream.muteVideo();
-    } else {
-      localStream.unmuteAudio();
-      localStream.unmuteVideo();
-    }
+    await room.localParticipant.setMicrophoneEnabled(!isPaused);
+    await room.localParticipant.setCameraEnabled(!isPaused);
   } catch (e) {
     console.warn('Pause toggle error:', e);
   }
 
-  // Silence (or restore) the judges' audio playback locally so a paused founder also stops hearing Cuban.
+  // Silence (or restore) the judges' audio locally so a paused founder also
+  // stops hearing the judge.
   try {
-    document.querySelectorAll('#remote-audio audio').forEach(a => { a.muted = isPaused; });
-  } catch (e) { console.warn('Remote audio mute toggle error:', e); }
+    document.querySelectorAll('#remote-audio audio').forEach((a) => { a.muted = isPaused; });
+  } catch (e) {
+    console.warn('Remote audio mute toggle error:', e);
+  }
 
-  // Tell the backend so server-side logic can react while the user is paused.
   if (ws && ws.readyState === WebSocket.OPEN) {
     try { ws.send(JSON.stringify({ type: 'user_paused', paused: isPaused })); }
     catch (e) { console.warn('user_paused send error:', e); }
@@ -1423,8 +1653,56 @@ pauseBtn.addEventListener('click', () => {
   pauseBtn.textContent = isPaused ? 'Resume' : 'Pause';
 });
 
-// Watch the remote audio sink so any <audio> added by TRTC after pause-start still gets muted.
-const remoteAudioSink = document.getElementById('remote-audio');
+// Share Screen / Stop Sharing (LiveKit)
+shareBtn.addEventListener('click', async () => {
+  if (!room || !rtcReady) return;
+  if (sharingScreen) {
+    await stopScreenShare();
+  } else {
+    await startScreenShare();
+  }
+});
+
+async function startScreenShare() {
+  try {
+    // setScreenShareEnabled handles the picker, publishing, and the auto-stop
+    // behavior when the user clicks the browser's native Stop sharing pill.
+    const publication = await room.localParticipant.setScreenShareEnabled(true);
+    sharingScreen = !!publication;
+    if (publication && publication.track) {
+      screenTrack = publication.track;
+      const mediaTrack = publication.track.mediaStreamTrack;
+      if (mediaTrack) {
+        mediaTrack.onended = () => {
+          console.log('User stopped screen share via browser UI');
+          stopScreenShare();
+        };
+      }
+    }
+    document.body.classList.toggle('sharing', sharingScreen);
+    shareBtn.textContent = sharingScreen ? 'Stop Sharing' : 'Share Screen';
+  } catch (err) {
+    console.error('Screen share failed:', err);
+    sharingScreen = false;
+    document.body.classList.remove('sharing');
+    shareBtn.textContent = 'Share Screen';
+  }
+}
+
+async function stopScreenShare() {
+  try {
+    await room.localParticipant.setScreenShareEnabled(false);
+  } catch (e) {
+    console.warn('stop screen share failed:', e);
+  }
+  screenTrack = null;
+  sharingScreen = false;
+  document.body.classList.remove('sharing');
+  shareBtn.textContent = 'Share Screen';
+}
+
+// Watch the remote audio sink so any <audio> added after pause-start still
+// gets muted automatically.
 if (remoteAudioSink && typeof MutationObserver !== 'undefined') {
   new MutationObserver((mutations) => {
     if (!isPaused) return;
@@ -1436,45 +1714,31 @@ if (remoteAudioSink && typeof MutationObserver !== 'undefined') {
   }).observe(remoteAudioSink, { childList: true, subtree: true });
 }
 
-// ---------------------------------------------------------------------------
-// Exit — tear everything down and show a goodbye overlay
-// ---------------------------------------------------------------------------
+// Exit. Tear everything down and show a goodbye overlay.
 exitBtn.addEventListener('click', async () => {
   if (sessionEnded) return;
   sessionEnded = true;
   pauseBtn.disabled = true;
   exitBtn.disabled  = true;
+  shareBtn.disabled = true;
 
-  // Stop the mood capture loop first so it doesn't fight cleanup
   stopMoodCapture();
 
-  // Tear down the local stream
-  if (localStream) {
-    try {
-      if (trtc) {
-        await trtc.unpublish(localStream);
-      }
-    } catch (e) {
-      console.warn('Unpublish error:', e);
-    }
-    try {
-      localStream.stop();
-    } catch (e) {
-      console.warn('localStream.stop error:', e);
-    }
-    localStream = null;
+  if (sharingScreen) {
+    try { await stopScreenShare(); } catch (e) { console.warn('stopScreenShare on exit failed:', e); }
   }
 
-  // Leave the TRTC room
-  if (trtc) {
-    try {
-      await trtc.leave();
-    } catch (e) {
-      console.warn('TRTC leave error:', e);
-    }
+  for (const t of localTracks) {
+    try { t.stop(); } catch (e) { console.warn('local track stop error:', e); }
+  }
+  localTracks = [];
+
+  if (room) {
+    try { await room.disconnect(); }
+    catch (e) { console.warn('LiveKit disconnect error:', e); }
+    room = null;
   }
 
-  // Close the websocket without triggering the reconnect loop
   if (ws) {
     try {
       ws.onclose = null;
@@ -1495,10 +1759,8 @@ function showGoodbyeOverlay() {
   if (overlay) overlay.style.display = 'flex';
 }
 
-// ---------------------------------------------------------------------------
-// Mood frame capture — grab the injected <video>, draw to a hidden canvas,
-// and ship a JPEG base64 frame over the websocket every 3 seconds.
-// ---------------------------------------------------------------------------
+// Mood frame capture: draw the local <video> to a hidden canvas and ship a
+// JPEG base64 frame every 10s (matches backend rate-limit behavior).
 function startMoodCapture() {
   if (moodIntervalId) return;
   if (!moodCanvas) {
@@ -1506,8 +1768,6 @@ function startMoodCapture() {
     moodCanvas.width  = 320;
     moodCanvas.height = 240;
   }
-  // 10s cadence keeps mood RPM under Gemini free-tier limits; server-side
-  // rate-limiting in main.py also drops anything faster than 8s.
   moodIntervalId = setInterval(captureMoodFrame, 10000);
 }
 
@@ -1538,8 +1798,8 @@ function captureMoodFrame() {
   }
 }
 
-// Pre-connect websocket in background even before TRTC join
-// (catches room_ready if backend starts first)
+// Pre-connect websocket in the background so we catch any early backend
+// announcements before the user clicks Join.
 connectWebSocket();
 </script>
 </body>

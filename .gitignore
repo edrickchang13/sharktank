@@ -1,8 +1,21 @@
-# Secrets
+# Secrets - NEVER commit
 .env
-.env.local
+.env.*
+*.env
+*.env.bak
+*.env.local
+*.env.production
+!.env.example
 *.pem
 *.key
+*.p12
+*.pfx
+secrets/
+credentials.json
+service-account*.json
+.aws/
+.gcp/
+.azure/
 
 # Python
 __pycache__/

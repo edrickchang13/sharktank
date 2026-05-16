@@ -1,0 +1,45 @@
+# Two-process Shark Tank: FastAPI web server + LiveKit Agent worker.
+# Both share the same image (built from Dockerfile) and the same .env file.
+# The worker connects out to LiveKit Cloud (LIVEKIT_URL in .env) and the
+# web server serves the frontend at http://localhost:8000. They live on a
+# bridge network so the worker can POST /session_log to web:8000 if needed.
+
+services:
+  web:
+    build: .
+    image: sharktank:latest
+    container_name: sharktank-web
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    command: ["python", "main.py"]
+    networks:
+      - sharktank
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/').read()"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  worker:
+    image: sharktank:latest
+    container_name: sharktank-worker
+    env_file:
+      - .env
+    depends_on:
+      web:
+        condition: service_started
+    command: ["python", "agent.py", "start"]
+    networks:
+      - sharktank
+    restart: unless-stopped
+    environment:
+      # Worker uses this base URL to reach the web service for /session_log.
+      - SESSION_LOG_URL=http://web:8000/session_log
+
+networks:
+  sharktank:
+    driver: bridge

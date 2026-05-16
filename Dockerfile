@@ -1,3 +1,6 @@
+# Builds the FastAPI HTTP+WS server image (main.py).
+# The LiveKit Agent worker is a SEPARATE process (python agent.py start).
+# Run two containers in production, or override CMD to launch the worker.
 FROM python:3.12-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -12,19 +15,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Vision Agents feat/tencent-rtc, install plugins editable. Tencent plugin
-# (liteav) is skipped; agent.py falls back to getstream.Edge() automatically.
-RUN git clone --depth 1 --branch feat/tencent-rtc \
-    https://github.com/GetStream/vision-agents.git /tmp/va
-
+# Python deps, LiveKit Agents + LemonSlice + Google Gemini + COS + FastAPI.
+# Version pins from /tmp/lemonslice-ref/.../agent/pyproject.toml.
 RUN pip install --no-cache-dir \
-    -e /tmp/va/agents-core \
-    -e /tmp/va/plugins/gemini \
-    -e /tmp/va/plugins/getstream \
-    -e /tmp/va/plugins/smart_turn \
-    -e /tmp/va/plugins/tencent
-
-RUN pip install --no-cache-dir \
+    "livekit-agents[google,silero,turn-detector]>=1.3.12" \
+    "livekit-plugins-lemonslice>=1.3.12" \
+    livekit-api \
+    livekit \
     fastapi \
     "uvicorn[standard]" \
     websockets \
@@ -36,4 +33,5 @@ RUN pip install --no-cache-dir \
 COPY . /app
 
 EXPOSE 8000
+
 CMD ["python", "main.py"]
