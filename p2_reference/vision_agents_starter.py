@@ -173,8 +173,8 @@ def on_turn_end(session: Session, transcript: str, agent: "Agent") -> dict[str, 
     session.add_turn(transcript, next_judge, response_text, audio_url, latency_ms)
 
     # P2: emit this over your websocket to P3. P3 expects {judge, text, audio}.
-    # Audio may need transcoding (raw 24kHz PCM vs. base64 MP3); see
-    # HANDOFF_TO_P2.md open question 3.
+    # Audio may need transcoding (raw 24kHz PCM vs. base64 MP3) before P3
+    # can play it; confirm format with P3 during integration.
     return {
         "judge": next_judge,
         "text": response_text,
