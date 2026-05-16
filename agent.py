@@ -29,6 +29,26 @@ from google.genai.types import (
     VoiceConfigDict,
 )
 
+# Optional VAD tuning types -- newer google-genai exposes these for tightening
+# silence detection. If unavailable, we fall back to library defaults (slow).
+try:
+    from google.genai.types import (
+        AutomaticActivityDetection,
+        EndSensitivity,
+        RealtimeInputConfig,
+        StartSensitivity,
+    )
+    _FAST_VAD = RealtimeInputConfig(
+        automatic_activity_detection=AutomaticActivityDetection(
+            start_of_speech_sensitivity=StartSensitivity.START_SENSITIVITY_HIGH,
+            end_of_speech_sensitivity=EndSensitivity.END_SENSITIVITY_HIGH,
+            silence_duration_ms=300,
+            prefix_padding_ms=50,
+        )
+    )
+except Exception:
+    _FAST_VAD = None
+
 load_dotenv()
 
 from vision_agents.core import Agent, User
@@ -62,11 +82,18 @@ GEMINI_MODEL = os.environ.get(
 # ---------------------------------------------------------------------------
 
 _broadcast_fn: Optional[Callable] = None
+_session_fn: Optional[Callable] = None
 
 
 def set_broadcast(fn: Callable) -> None:
     global _broadcast_fn
     _broadcast_fn = fn
+
+
+def set_session_hook(fn: Callable) -> None:
+    """main.py registers a callback to receive the live Session for mood writes."""
+    global _session_fn
+    _session_fn = fn
 
 
 async def _emit_to_p3(payload: dict) -> None:
@@ -86,37 +113,12 @@ _executor = ThreadPoolExecutor(max_workers=1)
 
 
 def _get_mood_sync() -> float:
-    """Capture one webcam frame, score confidence 0-1 via Gemini vision."""
-    try:
-        import cv2
-        cap = cv2.VideoCapture(0)
-        ok, frame = cap.read()
-        cap.release()
-        if not ok:
-            return 0.5
-        _, buf = cv2.imencode(".jpg", frame)
-        b64 = base64.b64encode(buf.tobytes()).decode()
+    """Mood now arrives from the browser via main.py WS; cv2 path disabled.
 
-        from google import genai
-        client = genai.Client(api_key=os.environ["GOOGLE_API_KEY"])
-        resp = client.models.generate_content(
-            model="gemini-2.0-flash",
-            contents=[{
-                "parts": [
-                    {"inline_data": {"mime_type": "image/jpeg", "data": b64}},
-                    {"text": (
-                        "You are analyzing a person's confidence during a startup pitch. "
-                        "Look at their facial expression, posture, and body language. "
-                        "Return only a single float between 0.0 and 1.0 representing "
-                        "their confidence level, where 0.0 is extremely nervous and "
-                        "1.0 is very confident. Return only the number, nothing else."
-                    )},
-                ]
-            }]
-        )
-        return max(0.0, min(1.0, float(resp.text.strip())))
-    except Exception:
-        return 0.5
+    The real signal is set from main.py's WebSocket frame handler which calls
+    Gemini Vision on uploaded JPEGs and writes to ``session.mood`` directly.
+    """
+    return 0.5
 
 
 async def _mood_loop(session: "Session") -> None:
@@ -139,19 +141,30 @@ async def _mood_loop(session: "Session") -> None:
 def make_llm_for_judge(judge_key: str, mood: float) -> gemini.Realtime:
     voice = _JUDGES_EXPORT[judge_key]["gemini_voice"]
     system_instruction = judges.render_system_prompt(judge_key, mood)
+    config_kwargs: dict[str, Any] = dict(
+        response_modalities=[Modality.AUDIO],
+        speech_config=SpeechConfigDict(
+            voice_config=VoiceConfigDict(
+                prebuilt_voice_config=PrebuiltVoiceConfigDict(voice_name=voice)
+            ),
+            language_code="en-US",
+        ),
+        system_instruction=system_instruction,
+        output_audio_transcription={},
+        input_audio_transcription={},
+    )
+    # Tighten Gemini's silence-to-turn-end window when the model supports it.
+    # Default is ~800-1000ms; 300ms makes the judge feel real-time.
+    if _FAST_VAD is not None:
+        config_kwargs["realtime_input_config"] = _FAST_VAD
+
     return gemini.Realtime(
         model=GEMINI_MODEL,
-        config=LiveConnectConfigDict(
-            response_modalities=[Modality.AUDIO],
-            speech_config=SpeechConfigDict(
-                voice_config=VoiceConfigDict(
-                    prebuilt_voice_config=PrebuiltVoiceConfigDict(voice_name=voice)
-                ),
-                language_code="en-US",
-            ),
-            system_instruction=system_instruction,
-        ),
-        fps=3,
+        config=LiveConnectConfigDict(**config_kwargs),
+        # fps=1 instead of 3: still enough for facial-mood and gesture reads
+        # at hackathon scale, frees compute and bandwidth so audio response
+        # comes back faster.
+        fps=1,
     )
 
 
@@ -228,12 +241,14 @@ async def _cos_upload_audio(
 def build_agent(session: Session) -> Agent:
     initial_llm = make_llm_for_judge(session.current_judge_key, session.mood)
 
+    # Drop smart_turn: gemini.Realtime owns VAD internally and silently
+    # disables external turn detectors. Passing it adds a no-op plugin
+    # init cost without affecting behavior. Removing tightens startup.
     agent = Agent(
         edge=build_edge(),
         agent_user=User(name="Shark Tank Judge", id="shark-tank-agent"),
         instructions="",
         llm=initial_llm,
-        turn_detection=smart_turn.TurnDetection(),
     )
 
     _audio_buffer: list[bytes] = []
@@ -350,6 +365,11 @@ async def join_call(agent: Agent, session: Session) -> None:
 
 async def run_agent() -> None:
     session = Session()
+    if _session_fn is not None:
+        try:
+            _session_fn(session)
+        except Exception as e:
+            print(f"[session hook] {e}", flush=True)
     agent = build_agent(session)
     print(
         f"Agent ready -- judge={session.current_judge_key}  "
