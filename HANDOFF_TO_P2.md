@@ -1,10 +1,10 @@
 # P1 to P2 Handoff: Shark Tank Simulator
 
-This is the credentials and architecture handoff for P2 of our ACM x AIC Hack-A-Stack project (Shark Tank pitch simulator). Current stack: Vision Agents on the `feat/tencent-rtc` branch with `tencent.Edge()` WebRTC transport, `gemini.Realtime` for native audio output (model `gemini-2.5-flash-native-audio-preview-12-2025`), smart-turn VAD, Tencent COS session logging from P1, and 2D pixel-art judge images on the P3 frontend. You own the entire Vision Agents backend and the websocket to P3.
+This is the credentials and architecture handoff for P2 of our ACM x AIC Hack-A-Stack project (Shark Tank pitch simulator). Current stack: Vision Agents with `getstream.Edge()` as the primary WebRTC transport (tencent.Edge is unstable on feat/tencent-rtc today), `gemini.Realtime` handling LLM plus native audio plus VAD (model `gemini-2.5-flash-native-audio-preview-12-2025`), Tencent COS session logging from P1, and 2D pixel-art judge images on the P3 frontend. You own the entire Vision Agents backend and the websocket to P3.
 
 ## Credentials policy (READ THIS FIRST)
 
-- All 6 credential values are sent to you via secure channel (DM, Signal, or 1Password share).
+- P1 credentials (TRTC pair, Google API key, Tencent pair, COS bucket/region) are sent via secure channel (DM, Signal, or 1Password share). Stream creds P2 fetches from getstream.io.
 - NEVER paste real values into this file, into commits, into chat, or into any tracked file.
 - You receive values out-of-band and paste them into your local `.env` only.
 - `.env` is gitignored. If a real key lands in a tracked file by mistake, rotate the key first, then scrub.
@@ -12,22 +12,29 @@ This is the credentials and architecture handoff for P2 of our ACM x AIC Hack-A-
 ## .env template
 
 ```env
-# Values sent via secure channel by P1, paste here:
-TRTC_SDK_APP_ID=<paste from secure DM>
-TRTC_SECRET_KEY=<paste from secure DM>
-GOOGLE_API_KEY=<paste from secure DM>
+# From P1 (sent via secure channel)
+TRTC_SDK_APP_ID=<from P1>
+TRTC_SECRET_KEY=<from P1>
+STREAM_API_KEY=<P2 obtains from getstream.io>     # PRIMARY transport, used by getstream.Edge()
+STREAM_API_SECRET=<P2 obtains from getstream.io>
+GOOGLE_API_KEY=<from P1>                          # Gemini Live, sole LLM+TTS+VAD
 GEMINI_MODEL=gemini-2.5-flash-native-audio-preview-12-2025
 
-# COS session logging (cos.py reads these directly)
-TENCENT_SECRET_ID=<paste from secure DM>
-TENCENT_SECRET_KEY=<paste from secure DM>
-COS_BUCKET=<paste from secure DM>
-COS_REGION=<paste from secure DM, currently na-siliconvalley>
-
-# You obtain these separately from getstream.io
-STREAM_API_KEY=<P2 gets from getstream.io>
-STREAM_API_SECRET=<P2 gets from getstream.io>
+# From P1 (cos.py session logging)
+TENCENT_SECRET_ID=<from P1>
+TENCENT_SECRET_KEY=<from P1>
+COS_BUCKET=<from P1>
+COS_REGION=<from P1, currently na-siliconvalley>
 ```
+
+## P2 Integration Findings (May 16)
+
+P2 has built agent.py and proven the wiring. Key learnings to apply:
+
+- **Transport**: `tencent.Edge()` is unstable on feat/tencent-rtc today. Use `getstream.Edge()` as primary, keep tencent as a try-first with fallback. P1's TRTC creds are still useful if tencent.Edge stabilizes during the demo.
+- **No smart-turn, no ElevenLabs**: `gemini.Realtime()` takes over STT/TTS/VAD. Do not add smart_turn or elevenlabs to the agent config; they get silently disabled.
+- **Join order**: Browser opens the call URL first. Then agent polls Stream REST API to detect the participant and joins after. Agent-first join times out the SFU.
+- **No stdin under `uv run`**: do not use `input()` or `run_in_executor(None, input)` in the agent. Use REST polling.
 
 ## Gemini Live voice mapping
 
@@ -99,26 +106,53 @@ def make_llm_for_judge(judge_key: str, mood: float) -> "gemini.Realtime":
     return gemini.Realtime(
         model=GEMINI_MODEL,
         config=LiveConnectConfigDict(
-            response_modalities=[Modality.AUDIO],
-            speech_config=SpeechConfigDict(
-                voice_config=VoiceConfigDict(
-                    prebuilt_voice_config=PrebuiltVoiceConfigDict(voice_name=voice)
+                response_modalities=[Modality.AUDIO],
+                speech_config=SpeechConfigDict(
+                    voice_config=VoiceConfigDict(
+                        prebuilt_voice_config=PrebuiltVoiceConfigDict(voice_name=voice)
+                    ),
+                    language_code="en-US",
                 ),
-                language_code="en-US",
-            ),
-            system_instruction=instructions,
+                system_instruction=instructions,
         ),
         fps=3,
     )
 
 
 def build_agent(session: Session) -> "Agent":
+    # Try tencent first, fall back to getstream. P2 found tencent.Edge unstable
+    # on feat/tencent-rtc, so getstream.Edge is the primary transport in practice.
+    try:
+        edge = tencent.Edge()
+    except Exception:
+        edge = getstream.Edge()
     return Agent(
-        edge=make_edge(),
+        edge=edge,
         llm=make_llm_for_judge(session.current_judge, session.mood),
-        turn_detection=smart_turn.VAD(),
     )
 ```
+
+**Gotcha**: do not pass `turn_detection=smart_turn.VAD()` or wire ElevenLabs as a TTS plugin. `gemini.Realtime()` handles STT, TTS, and VAD internally and will silently disable both if you try.
+
+### Runtime lifecycle
+
+Stream SFU rejects an agent join when the room has zero participants, so order matters:
+
+1. P3 opens the call URL in the browser and joins the call.
+2. The agent polls the Stream REST API for the call's participant list.
+3. Once the founder is detected, the agent joins and Gemini Live starts streaming audio.
+
+Do not block the agent on stdin. `asyncio.run_in_executor(None, input)` raises `EOFError` under `uv run` because stdin is not a tty. Drive the loop off the REST poll instead.
+
+### Frontend join URL
+
+P3 builds a URL of this shape (verified in P2's session):
+
+```
+https://getstream.io/video/demos/join/{call_id}?api_key={key}&token={jwt}&skip_lobby=true&user_name=Founder
+```
+
+Example `call_id` used during P2 testing: `sharktank-dev`. The JWT is generated server-side with `STREAM_API_SECRET`.
 
 The full starter file at `p2_reference/vision_agents_starter.py` includes the `Session` class, `on_turn_end` callback, `on_session_end` callback, mood helpers, and a smoke `main()`.
 
@@ -151,9 +185,9 @@ Session JSON shape uploaded at end of run:
 
 ## Open questions to verify at integration
 
-1. Does Vision Agents support hot-swapping `agent.llm` mid-session for judge changes, or does each judge change require reconstructing the Agent? Starter file assumes hot-swap works, with a fallback comment.
-2. smart-turn VAD compatibility under `tencent.Edge()` on the `feat/tencent-rtc` branch is unconfirmed.
-3. Gemini native audio outputs 24kHz PCM. Does P3's frontend handle PCM directly, or do you need to transcode to MP3 client-side before websocket emit? Confirm with P3.
+1. Does Vision Agents support hot-swapping `agent.llm` mid-session for judge changes, or does each judge change require reconstructing the Agent? Research left this unconfirmed and P2's findings don't speak to it yet. P2 is investigating mid-session swap; for now plan on agent reconstruction per judge change.
+2. smart-turn relevance: RESOLVED. `gemini.Realtime()` internalizes VAD, the smart-turn slot is unused.
+3. Gemini native audio outputs 24kHz PCM. Does P3's frontend handle PCM directly, or do you need to transcode to MP3 client-side before websocket emit? P2 hasn't reported on this yet, P3 to confirm during integration.
 
 ## Quickstart
 
@@ -162,9 +196,9 @@ git clone https://github.com/edrickchang13/sharktank
 cd sharktank
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
-# .venv/bin/pip install vision-agents[tencent,gemini,smart-turn] google-genai httpx
+# .venv/bin/pip install vision-agents[getstream,gemini] google-genai httpx
 cp .env.example .env
-# paste the 8 secret values from P1's secure DM into .env
+# paste P1's secure-DM values into .env, then add your STREAM_API_KEY and STREAM_API_SECRET
 .venv/bin/python smoke_test.py  # expect 10 passed
 .venv/bin/python p2_reference/vision_agents_starter.py  # smoke run (needs vision-agents installed)
 ```

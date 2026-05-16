@@ -1,13 +1,20 @@
 """Vision Agents starter for Shark Tank Simulator (P2 reference).
 
-Wired: tencent.Edge() from env, gemini.Realtime with response_modalities=
-[AUDIO] and per-judge voice swap, judge prompts from judges_export.json,
-judge rotation (cuban opens, low-mood -> corcoran, else rotate), COS
-callbacks for per-turn audio + session JSON.
+Wired: tencent.Edge() primary with getstream.Edge() fallback, gemini.Realtime
+with response_modalities=[AUDIO] and per-judge voice swap, judge prompts
+from judges_export.json, judge rotation (cuban opens, low-mood -> corcoran,
+else rotate), COS callbacks for per-turn audio + session JSON.
 
-P2 owns: websocket transport to P3, smart-turn VAD wiring under
-tencent.Edge, real mood processor (webcam, ~3s), agent.llm hot-swap or
-agent reconstruction per judge change.
+P2 owns: websocket transport to P3, real mood processor (webcam, ~3s),
+agent.llm hot-swap or agent reconstruction per judge change, Stream REST
+participant polling so the agent joins only after the browser has joined.
+
+Required env vars (from P1's secure DM, paste into .env):
+  TRTC_SDK_APP_ID, TRTC_SECRET_KEY (Tencent transport, primary)
+  STREAM_API_KEY, STREAM_API_SECRET (GetStream transport, fallback)
+  GOOGLE_API_KEY (Gemini Live, sole LLM+TTS+VAD)
+  GEMINI_MODEL (default below)
+  TENCENT_SECRET_ID, TENCENT_SECRET_KEY, COS_BUCKET, COS_REGION (cos.py)
 """
 
 import json
@@ -26,7 +33,7 @@ from google.genai.types import (
     VoiceConfigDict,
 )
 from vision_agents import Agent
-from vision_agents.plugins import gemini, smart_turn, tencent
+from vision_agents.plugins import gemini, getstream, tencent
 
 load_dotenv()
 
@@ -92,11 +99,35 @@ def make_llm_for_judge(judge_key: str, mood: float) -> "gemini.Realtime":
     )
 
 
-def make_edge() -> "tencent.Edge":
-    return tencent.Edge(
-        app_id=int(os.environ["TRTC_SDK_APP_ID"]),
-        secret=os.environ["TRTC_SECRET_KEY"],
-    )
+def make_edge():
+    """Construct WebRTC transport. Prefers Tencent (sponsor track) but falls
+    back to GetStream if Tencent.Edge fails (common on feat/tencent-rtc as of
+    May 16). Both reach the same SFU pool via different ingress paths.
+    """
+    try:
+        return tencent.Edge(
+            app_id=int(os.environ["TRTC_SDK_APP_ID"]),
+            secret=os.environ["TRTC_SECRET_KEY"],
+        )
+    except Exception as exc:
+        print(f"[warn] tencent.Edge unavailable ({exc}); falling back to getstream.Edge")
+        return getstream.Edge(
+            api_key=os.environ["STREAM_API_KEY"],
+            api_secret=os.environ["STREAM_API_SECRET"],
+        )
+
+
+def wait_for_participant(call_id: str, timeout_s: int = 120) -> None:
+    """Poll Stream REST API for participants in call_id. Returns when first
+    non-agent participant joins. Raises TimeoutError after timeout_s.
+
+    P2 finding: agent.Edge() join() against an empty room times out.
+    Browser must join first.
+    """
+    # TODO(P2): poll GET /video/call/default/{call_id} every 2-3s for
+    # participants list; return when len(participants) > 0 and any
+    # participant is not the agent itself.
+    raise NotImplementedError("Poll Stream REST API here")
 
 
 # Session state.
@@ -137,7 +168,7 @@ def get_mood() -> float:
 # Callbacks.
 
 def on_turn_end(session: Session, transcript: str, agent: "Agent") -> dict[str, Any]:
-    """Called by Vision Agents when smart-turn detects pitch end.
+    """Called by Vision Agents when Gemini's internal VAD detects pitch end.
 
     Returns dict to emit to websocket: {judge, text, audio}.
     """
@@ -193,16 +224,28 @@ def on_session_end(session: Session) -> str:
 
 
 def build_agent(session: Session) -> "Agent":
+    # Gemini Realtime handles VAD internally, smart_turn would be a no-op
+    # (and silently disables ElevenLabs TTS too). Do not pass turn_detection.
     return Agent(
         edge=make_edge(),
         llm=make_llm_for_judge(session.current_judge, session.mood),
-        turn_detection=smart_turn.VAD(),
     )
 
 
 def main() -> None:
-    """Minimal smoke loop with no websocket. Replace with the real Vision
-    Agents lifecycle and websocket server."""
+    """Local smoke check. The real run loop:
+    1. Print the call join URL for the browser user
+    2. Call wait_for_participant(call_id) to block until a human joins
+    3. Build agent and call agent.run() / lifecycle method
+    4. Agent participates in the call, emits audio, fires on_turn_end on
+       Gemini's internal VAD events
+    5. P2 routes on_turn_end to cos.upload_audio and emits the websocket
+       message {judge, text, audio} to P3
+
+    Gotcha: under `uv run`, asyncio.run_in_executor(None, input) fails with
+    EOFError because there is no stdin. Use wait_for_participant (REST poll)
+    instead of any input() prompt to block until the browser joins.
+    """
     session = Session()
     voice = JUDGES[session.current_judge]["gemini_voice"]
     print(f"Session: {session.id}")

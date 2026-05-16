@@ -119,13 +119,18 @@ See `.env.example`. Summary:
 
 ## Architecture decisions log (most recent first)
 
-1. **20:00** Separate TTS plugin dropped. Vision Agents gemini.Realtime ships with response_modalities=[AUDIO] by default. Single API call produces both judge text and audio. Per-judge voice swap via voice_name param (Charon/Orus/Aoede).
-2. **19:44** Hunyuan dropped entirely. Gemini Live becomes sole LLM. Judge prompts move to Vision Agents `instructions` field. P1 scope reduces to creds handoff + COS logging.
-3. **19:30** Tencent IVH dropped (needs purchased avatar key). HeyGen dropped. P3 builds custom 2D pixel images (6 total). Tencent TTS dropped, replaced by an external TTS plugin (later dropped, see entry 1). Websocket schema locked: `{ judge, text, audio }`.
-4. **18:43** Original 3-person split: P1 = all Tencent (IVH, TRTC, Hunyuan, TTS, COS), P2 = GetStream, P3 = OpenCV/pyaudio frontend.
+1. **20:49** P2 integration findings logged. `tencent.Edge()` unstable on feat/tencent-rtc, P2 uses `getstream.Edge()` as actual transport. `gemini.Realtime()` silently disables ElevenLabs and SmartTurn (Gemini owns STT/TTS/VAD). Stream SFU requires browser-first join (agent times out against empty room). `asyncio.run_in_executor(None, input)` fails under `uv run`. P2 polls Stream REST API for participant presence.
+2. **20:00** Separate TTS plugin dropped. Vision Agents gemini.Realtime ships with response_modalities=[AUDIO] by default. Single API call produces both judge text and audio. Per-judge voice swap via voice_name param (Charon/Orus/Aoede).
+3. **19:44** Hunyuan dropped entirely. Gemini Live becomes sole LLM. Judge prompts move to Vision Agents `instructions` field. P1 scope reduces to creds handoff + COS logging.
+4. **19:30** Tencent IVH dropped (needs purchased avatar key). HeyGen dropped. P3 builds custom 2D pixel images (6 total). Tencent TTS dropped, replaced by an external TTS plugin (later dropped, see entry 2). Websocket schema locked: `{ judge, text, audio }`.
+5. **18:43** Original 3-person split: P1 = all Tencent (IVH, TRTC, Hunyuan, TTS, COS), P2 = GetStream, P3 = OpenCV/pyaudio frontend.
 
 ## Known gotchas
 
+- **Transport fallback**: `tencent.Edge()` unstable on feat/tencent-rtc as of May 16. Primary transport in practice is `getstream.Edge()` with Stream API key. Tencent creds still attempted first.
+- **gemini.Realtime takes over STT/TTS/VAD**: do not add `smart_turn`, `elevenlabs`, or any STT/TTS plugin to the agent config. They get silently disabled. Gemini handles all voice internally with 24kHz PCM output.
+- **Stream SFU join order**: browser must join the call first. Agent that joins first times out the room. P2 polls Stream REST API for participant presence and joins after.
+- **No stdin under `uv run`**: `asyncio.run_in_executor(None, input)` raises EOFError. Use REST polling instead of input prompts.
 - **Gemini Live audio format**: native audio outputs 24kHz PCM, not MP3. P3 frontend may need to handle PCM or P2 transcodes.
 - **Vision Agents agent.llm hot-swap**: unconfirmed whether Vision Agents supports reassigning `agent.llm` mid-session. May need agent reconstruction per judge change.
 - **TRTC SDKSecretKey != CAM SecretKey**: two separate consoles, two separate credentials.
