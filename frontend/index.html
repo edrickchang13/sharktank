@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Shark Tank Simulator</title>
+  <script src="https://web.sdk.qcloud.com/trtc/webrtc/v5/trtc.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0a0a0a;
+      color: #f0f0f0;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* ── Header ── */
+    #header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 20px;
+      background: #111;
+      border-bottom: 1px solid #222;
+      flex-shrink: 0;
+    }
+    #header h1 { font-size: 1.1rem; color: #e8b800; letter-spacing: 1px; }
+    #status-bar { display: flex; gap: 20px; font-size: 0.75rem; color: #888; }
+    #status-bar span { display: flex; align-items: center; gap: 6px; }
+    .dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: #444; flex-shrink: 0;
+    }
+    .dot.green { background: #22c55e; }
+    .dot.yellow { background: #e8b800; }
+    .dot.red { background: #ef4444; }
+
+    /* ── Main split ── */
+    #main {
+      display: flex;
+      flex: 1;
+      min-height: 0;
+      gap: 2px;
+      background: #000;
+    }
+
+    /* ── Panels ── */
+    .panel {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      background: #111;
+      overflow: hidden;
+    }
+    .panel-label {
+      position: absolute;
+      top: 10px; left: 14px;
+      font-size: 0.7rem;
+      font-weight: 700;
+      letter-spacing: 2px;
+      color: #888;
+      text-transform: uppercase;
+      z-index: 10;
+    }
+
+    /* ── User webcam ── */
+    #local-video {
+      width: 100%; height: 100%;
+      background: #0d0d0d;
+      object-fit: cover;
+    }
+    /* TRTC injects a video element inside this div */
+    #local-video video {
+      width: 100%; height: 100%;
+      object-fit: cover;
+    }
+
+    /* ── Confidence bar ── */
+    #confidence-wrapper {
+      position: absolute;
+      bottom: 14px; left: 14px; right: 14px;
+      z-index: 10;
+    }
+    #confidence-label {
+      font-size: 0.65rem;
+      color: #aaa;
+      letter-spacing: 1px;
+      margin-bottom: 4px;
+    }
+    progress#confidence {
+      width: 100%; height: 6px;
+      border-radius: 3px;
+      border: none;
+      background: #222;
+      appearance: none;
+      -webkit-appearance: none;
+    }
+    progress#confidence::-webkit-progress-bar { background: #222; border-radius: 3px; }
+    progress#confidence::-webkit-progress-value {
+      background: linear-gradient(90deg, #ef4444, #e8b800, #22c55e);
+      border-radius: 3px;
+      transition: width 0.5s ease;
+    }
+    #confidence-pct { font-size: 0.7rem; color: #aaa; margin-top: 3px; }
+
+    /* ── Judge panel ── */
+    #judge-panel {
+      align-items: center;
+      justify-content: center;
+    }
+    #judge-name-overlay {
+      position: absolute;
+      bottom: 70px; left: 0; right: 0;
+      text-align: center;
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: #f0f0f0;
+      text-shadow: 0 2px 8px rgba(0,0,0,0.8);
+      z-index: 10;
+    }
+    #judge-subtitle {
+      position: absolute;
+      bottom: 48px; left: 0; right: 0;
+      text-align: center;
+      font-size: 0.7rem;
+      color: #e8b800;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      z-index: 10;
+    }
+    #judge-img {
+      max-width: 85%;
+      max-height: 85%;
+      object-fit: contain;
+      transition: opacity 0.2s ease;
+      image-rendering: pixelated;
+    }
+    #judge-img.swap { opacity: 0; }
+
+    /* ── Transcript ── */
+    #transcript-panel {
+      flex-shrink: 0;
+      height: 160px;
+      background: #0d0d0d;
+      border-top: 1px solid #1a1a1a;
+      display: flex;
+      flex-direction: column;
+      padding: 0;
+    }
+    #transcript-header {
+      padding: 6px 16px;
+      font-size: 0.65rem;
+      font-weight: 700;
+      letter-spacing: 2px;
+      color: #555;
+      border-bottom: 1px solid #1a1a1a;
+      flex-shrink: 0;
+    }
+    #transcript-log {
+      flex: 1;
+      overflow-y: auto;
+      padding: 8px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    #transcript-log::-webkit-scrollbar { width: 4px; }
+    #transcript-log::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
+    .tx-line {
+      font-size: 0.8rem;
+      line-height: 1.4;
+      display: flex;
+      gap: 8px;
+    }
+    .tx-speaker {
+      flex-shrink: 0;
+      font-weight: 700;
+      min-width: 90px;
+    }
+    .tx-speaker.judge-cuban    { color: #3b82f6; }
+    .tx-speaker.judge-oleary   { color: #ef4444; }
+    .tx-speaker.judge-corcoran { color: #a855f7; }
+    .tx-speaker.founder        { color: #22c55e; }
+    .tx-text { color: #ccc; }
+
+    /* ── Setup screen ── */
+    #setup-screen {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.92);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+    }
+    #setup-box {
+      background: #111;
+      border: 1px solid #333;
+      border-radius: 12px;
+      padding: 36px 40px;
+      max-width: 480px;
+      width: 90%;
+      text-align: center;
+    }
+    #setup-box h2 { color: #e8b800; margin-bottom: 8px; font-size: 1.3rem; }
+    #setup-box p  { color: #888; font-size: 0.85rem; margin-bottom: 24px; line-height: 1.5; }
+    #setup-error  { color: #ef4444; font-size: 0.8rem; margin-top: 12px; min-height: 20px; }
+
+    .btn {
+      background: #e8b800;
+      color: #000;
+      border: none;
+      border-radius: 8px;
+      padding: 12px 28px;
+      font-size: 0.9rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .btn:hover { background: #ffd000; }
+    .btn:disabled { background: #444; color: #888; cursor: not-allowed; }
+  </style>
+</head>
+<body>
+
+<!-- Setup / loading overlay -->
+<div id="setup-screen">
+  <div id="setup-box">
+    <h2>SHARK TANK SIMULATOR</h2>
+    <p id="setup-msg">Connecting to the pitch room...</p>
+    <button class="btn" id="join-btn" disabled>Join Pitch Room</button>
+    <div id="setup-error"></div>
+  </div>
+</div>
+
+<!-- Main UI (hidden until joined) -->
+<div id="header">
+  <h1>SHARK TANK SIMULATOR</h1>
+  <div id="status-bar">
+    <span><span class="dot" id="trtc-dot"></span><span id="trtc-label">TRTC</span></span>
+    <span><span class="dot" id="ws-dot"></span><span id="ws-label">WebSocket</span></span>
+    <span id="room-info" style="color:#555">—</span>
+  </div>
+</div>
+
+<div id="main">
+  <!-- Left: user webcam -->
+  <div class="panel" id="user-side">
+    <div class="panel-label">YOU</div>
+    <div id="local-video"></div>
+    <div id="confidence-wrapper">
+      <div id="confidence-label">CONFIDENCE</div>
+      <progress id="confidence" value="0.5" max="1"></progress>
+      <div id="confidence-pct">50%</div>
+    </div>
+  </div>
+
+  <!-- Right: judge -->
+  <div class="panel" id="judge-panel">
+    <div class="panel-label">JUDGE</div>
+    <img id="judge-img" src="/assets/judges/cuban.png" alt="Mark Cuban">
+    <div id="judge-name-overlay">Mark Cuban</div>
+    <div id="judge-subtitle">Shark</div>
+  </div>
+</div>
+
+<div id="transcript-panel">
+  <div id="transcript-header">LIVE TRANSCRIPT</div>
+  <div id="transcript-log"></div>
+</div>
+
+<script>
+// ---------------------------------------------------------------------------
+// Config
+// ---------------------------------------------------------------------------
+const urlParams = new URLSearchParams(window.location.search);
+const ROOM_ID   = parseInt(urlParams.get('room_id') || '0', 10);
+const WS_URL    = `ws://${location.hostname}:8000/ws`;
+const API_BASE  = `http://${location.hostname}:8000`;
+
+const JUDGE_INFO = {
+  cuban:    { name: 'Mark Cuban',         subtitle: 'Dallas Mavericks',  img: '/assets/judges/cuban.png'    },
+  oleary:   { name: "Kevin O'Leary",      subtitle: 'Mr. Wonderful',     img: '/assets/judges/oleary.png'   },
+  corcoran: { name: 'Barbara Corcoran',   subtitle: 'Real Estate Mogul', img: '/assets/judges/corcoran.png' },
+};
+
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
+let trtc        = null;
+let ws          = null;
+let currentJudge = 'cuban';
+let trtcReady   = false;
+let wsReady     = false;
+
+// ---------------------------------------------------------------------------
+// DOM refs
+// ---------------------------------------------------------------------------
+const setupScreen    = document.getElementById('setup-screen');
+const setupMsg       = document.getElementById('setup-msg');
+const setupError     = document.getElementById('setup-error');
+const joinBtn        = document.getElementById('join-btn');
+const trtcDot        = document.getElementById('trtc-dot');
+const trtcLabel      = document.getElementById('trtc-label');
+const wsDot          = document.getElementById('ws-dot');
+const wsLabel        = document.getElementById('ws-label');
+const roomInfo       = document.getElementById('room-info');
+const judgeImg       = document.getElementById('judge-img');
+const judgeNameEl    = document.getElementById('judge-name-overlay');
+const judgeSubtitle  = document.getElementById('judge-subtitle');
+const confidenceBar  = document.getElementById('confidence');
+const confidencePct  = document.getElementById('confidence-pct');
+const transcriptLog  = document.getElementById('transcript-log');
+
+// ---------------------------------------------------------------------------
+// Setup check
+// ---------------------------------------------------------------------------
+if (!ROOM_ID) {
+  setupMsg.textContent = 'No room ID in URL. Start the backend first — it will print the URL to open.';
+  setupError.textContent = 'Expected: http://localhost:8000/?room_id=XXXXXXXXXX';
+} else {
+  setupMsg.textContent = `Room ${ROOM_ID} — click to join.`;
+  joinBtn.disabled = false;
+}
+
+joinBtn.addEventListener('click', () => {
+  joinBtn.disabled = true;
+  joinBtn.textContent = 'Joining...';
+  setupError.textContent = '';
+  startSession();
+});
+
+// ---------------------------------------------------------------------------
+// TRTC
+// ---------------------------------------------------------------------------
+async function startSession() {
+  try {
+    // Fetch founder credentials from backend
+    const res = await fetch(`${API_BASE}/credentials?room_id=${ROOM_ID}`);
+    if (!res.ok) throw new Error(`/credentials returned ${res.status}`);
+    const creds = await res.json();
+    if (creds.error) throw new Error(creds.error);
+
+    setupMsg.textContent = 'Credentials obtained — joining TRTC room...';
+
+    trtc = TRTC.create();
+
+    // Remote audio: play it as soon as the judge's stream arrives
+    trtc.on(TRTC.EVENT.REMOTE_AUDIO_ADDED, async (event) => {
+      try {
+        const { userId, streamType } = event;
+        await trtc.startRemoteAudio({ userId, streamType });
+        console.log('Remote audio started for', userId);
+      } catch (e) {
+        console.warn('startRemoteAudio failed:', e);
+      }
+    });
+
+    trtc.on(TRTC.EVENT.ERROR, (error) => {
+      console.error('TRTC error:', error);
+      setTrtcStatus('error', 'TRTC Error');
+    });
+
+    await trtc.enterRoom({
+      roomId:   ROOM_ID,
+      sdkAppId: creds.sdk_app_id,
+      userId:   creds.user_id,
+      userSig:  creds.user_sig,
+    });
+
+    // Publish local audio + video
+    await trtc.startLocalAudio();
+    try {
+      await trtc.startLocalVideo({ view: 'local-video' });
+    } catch (e) {
+      console.warn('Camera unavailable:', e);
+    }
+
+    trtcReady = true;
+    setTrtcStatus('green', `TRTC · ${ROOM_ID}`);
+    roomInfo.textContent = `Room ${ROOM_ID}`;
+
+    // Hide setup overlay
+    setupScreen.style.display = 'none';
+
+    // Connect websocket
+    connectWebSocket();
+
+  } catch (err) {
+    joinBtn.disabled = false;
+    joinBtn.textContent = 'Retry';
+    setupError.textContent = `Error: ${err.message}`;
+    console.error(err);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// WebSocket
+// ---------------------------------------------------------------------------
+function connectWebSocket() {
+  ws = new WebSocket(WS_URL);
+
+  ws.onopen = () => {
+    wsReady = true;
+    setWsStatus('green', 'WebSocket');
+    console.log('WebSocket connected');
+  };
+
+  ws.onmessage = (event) => {
+    try {
+      handleMessage(JSON.parse(event.data));
+    } catch (e) {
+      console.warn('WS parse error:', e);
+    }
+  };
+
+  ws.onclose = () => {
+    wsReady = false;
+    setWsStatus('yellow', 'Reconnecting...');
+    setTimeout(connectWebSocket, 2000);
+  };
+
+  ws.onerror = (e) => {
+    console.error('WebSocket error:', e);
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Message handlers
+// ---------------------------------------------------------------------------
+function handleMessage(msg) {
+  switch (msg.type) {
+
+    case 'room_ready':
+      // Backend just announced the room — useful if WS connected before we joined
+      console.log('room_ready from backend:', msg.room_id);
+      break;
+
+    case 'judge':
+      // User finished speaking; next judge is about to respond
+      swapJudge(msg.judge);
+      setConfidence(msg.mood);
+      break;
+
+    case 'transcript':
+      // Agent finished speaking; append transcript line
+      appendTranscript(msg.judge, msg.text);
+      setConfidence(msg.mood);
+      break;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// UI updates
+// ---------------------------------------------------------------------------
+function swapJudge(key) {
+  if (key === currentJudge) return;
+  const info = JUDGE_INFO[key];
+  if (!info) return;
+  currentJudge = key;
+
+  judgeImg.classList.add('swap');
+  setTimeout(() => {
+    judgeImg.src          = info.img;
+    judgeNameEl.textContent = info.name;
+    judgeSubtitle.textContent = info.subtitle;
+    judgeImg.classList.remove('swap');
+  }, 200);
+}
+
+function setConfidence(mood) {
+  if (typeof mood !== 'number') return;
+  confidenceBar.value   = mood;
+  confidencePct.textContent = `${Math.round(mood * 100)}%`;
+}
+
+function appendTranscript(speakerKey, text) {
+  if (!text) return;
+  const info     = JUDGE_INFO[speakerKey];
+  const name     = info ? info.name : speakerKey;
+  const cssClass = info ? `judge-${speakerKey}` : 'founder';
+
+  const line = document.createElement('div');
+  line.className = 'tx-line';
+  line.innerHTML =
+    `<span class="tx-speaker ${cssClass}">${escHtml(name)}</span>` +
+    `<span class="tx-text">${escHtml(text)}</span>`;
+  transcriptLog.appendChild(line);
+  transcriptLog.scrollTop = transcriptLog.scrollHeight;
+}
+
+function escHtml(str) {
+  return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function setTrtcStatus(state, label) {
+  trtcDot.className = `dot ${state}`;
+  trtcLabel.textContent = label;
+}
+
+function setWsStatus(state, label) {
+  wsDot.className = `dot ${state}`;
+  wsLabel.textContent = label;
+}
+
+// Pre-connect websocket in background even before TRTC join
+// (catches room_ready if backend starts first)
+connectWebSocket();
+</script>
+</body>
+</html>

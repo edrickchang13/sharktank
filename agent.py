@@ -1,21 +1,22 @@
 """Shark Tank Vision Agents backend (P2).
 
-Edge: tencent.Edge (Linux) or getstream.Edge fallback (macOS dev).
+Edge: tencent.Edge (Linux) or getstream.Edge fallback.
 LLM: gemini.Realtime per judge -- voice + system instruction baked into config.
 VAD: smart_turn.TurnDetection.
 On each user turn: rotate judge, adapt prompt to mood, emit websocket msg,
-upload audio to COS (stubbed until COS creds arrive).
+upload audio to COS.
 """
 
+import base64
 import json
 import os
 import asyncio
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
-from urllib.parse import urlencode
+from typing import Any, Callable, Optional
 
 from dotenv import load_dotenv
 from google.genai.types import (
@@ -28,13 +29,18 @@ from google.genai.types import (
 
 load_dotenv()
 
-from getstream import Stream as StreamClient
 from vision_agents.core import Agent, User
-from vision_agents.core.llm.events import RealtimeUserSpeechTranscriptionEvent
+from vision_agents.core.llm.events import (
+    RealtimeAgentSpeechTranscriptionEvent,
+    RealtimeAudioOutputDoneEvent,
+    RealtimeAudioOutputEvent,
+    RealtimeUserSpeechTranscriptionEvent,
+)
 from vision_agents.plugins import gemini, getstream, smart_turn
+import cos
 import judges
+import trtc as trtc_mod
 
-# Tencent only ships manylinux wheels -- import is safe, construction raises on macOS
 try:
     from vision_agents.plugins import tencent as _tencent_mod
     _TENCENT_AVAILABLE = True
@@ -49,14 +55,79 @@ GEMINI_MODEL = os.environ.get(
     "GEMINI_MODEL", "gemini-2.5-flash-native-audio-preview-12-2025"
 )
 
+# ---------------------------------------------------------------------------
+# WebSocket broadcast hook (registered by main.py)
+# ---------------------------------------------------------------------------
+
+_broadcast_fn: Optional[Callable] = None
+
+
+def set_broadcast(fn: Callable) -> None:
+    global _broadcast_fn
+    _broadcast_fn = fn
+
+
+async def _emit_to_p3(payload: dict) -> None:
+    print(f"[ws -> P3] {payload}", flush=True)
+    if _broadcast_fn:
+        try:
+            await _broadcast_fn(payload)
+        except Exception as e:
+            print(f"[ws error] {e}", flush=True)
+
 
 # ---------------------------------------------------------------------------
-# Mood stub
+# Mood: webcam snapshot -> Gemini vision score (runs in thread pool)
 # ---------------------------------------------------------------------------
 
-def get_mood() -> float:
-    """Latest mood snapshot. Replace with real webcam analysis (~3s)."""
-    return 0.5
+_executor = ThreadPoolExecutor(max_workers=1)
+
+
+def _get_mood_sync() -> float:
+    """Capture one webcam frame, score confidence 0-1 via Gemini vision."""
+    try:
+        import cv2
+        cap = cv2.VideoCapture(0)
+        ok, frame = cap.read()
+        cap.release()
+        if not ok:
+            return 0.5
+        _, buf = cv2.imencode(".jpg", frame)
+        b64 = base64.b64encode(buf.tobytes()).decode()
+
+        from google import genai
+        client = genai.Client(api_key=os.environ["GOOGLE_API_KEY"])
+        resp = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=[{
+                "parts": [
+                    {"inline_data": {"mime_type": "image/jpeg", "data": b64}},
+                    {"text": (
+                        "You are analyzing a person's confidence during a startup pitch. "
+                        "Look at their facial expression, posture, and body language. "
+                        "Return only a single float between 0.0 and 1.0 representing "
+                        "their confidence level, where 0.0 is extremely nervous and "
+                        "1.0 is very confident. Return only the number, nothing else."
+                    )},
+                ]
+            }]
+        )
+        return max(0.0, min(1.0, float(resp.text.strip())))
+    except Exception:
+        return 0.5
+
+
+async def _mood_loop(session: "Session") -> None:
+    """Background task: update session.mood every ~3s without blocking the event loop."""
+    loop = asyncio.get_running_loop()
+    while True:
+        await asyncio.sleep(3)
+        try:
+            session.mood = await loop.run_in_executor(_executor, _get_mood_sync)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            print(f"[mood] {e}", flush=True)
 
 
 # ---------------------------------------------------------------------------
@@ -64,7 +135,6 @@ def get_mood() -> float:
 # ---------------------------------------------------------------------------
 
 def make_llm_for_judge(judge_key: str, mood: float) -> gemini.Realtime:
-    """Return a gemini.Realtime with the judge's voice and mood-adapted prompt."""
     voice = _JUDGES_EXPORT[judge_key]["gemini_voice"]
     system_instruction = judges.render_system_prompt(judge_key, mood)
     return gemini.Realtime(
@@ -114,23 +184,6 @@ class Session:
 
 
 # ---------------------------------------------------------------------------
-# COS stub (no-op until COS creds arrive from P1)
-# ---------------------------------------------------------------------------
-
-def _upload_audio_stub(session_id: str, turn_idx: int, judge_key: str,
-                        audio_bytes: bytes) -> str:
-    print(f"[cos stub] upload_audio session={session_id} turn={turn_idx} judge={judge_key} "
-          f"bytes={len(audio_bytes)}", flush=True)
-    return ""
-
-
-def _upload_session_stub(session_id: str, data: dict) -> str:
-    print(f"[cos stub] upload_session session={session_id} turns={len(data.get('turns', []))}",
-          flush=True)
-    return ""
-
-
-# ---------------------------------------------------------------------------
 # Edge selection
 # ---------------------------------------------------------------------------
 
@@ -143,8 +196,12 @@ def build_edge():
             edge = _tencent_mod.Edge(sdk_app_id=int(trtc_app_id), key=trtc_secret)
             print("Edge: Tencent TRTC", flush=True)
             return edge
-        except RuntimeError as e:
-            print(f"Tencent TRTC unavailable ({e}), falling back to GetStream", flush=True)
+        except Exception as e:
+            print(
+                f"Tencent TRTC unavailable ({type(e).__name__}: {e}), "
+                "falling back to GetStream",
+                flush=True,
+            )
 
     print("Edge: GetStream", flush=True)
     return getstream.Edge()
@@ -154,26 +211,36 @@ def build_edge():
 # Agent factory
 # ---------------------------------------------------------------------------
 
+async def _cos_upload_audio(
+    session_id: str, turn_idx: int, judge_key: str, audio_bytes: bytes
+) -> None:
+    loop = asyncio.get_running_loop()
+    try:
+        await loop.run_in_executor(
+            None, cos.upload_audio, session_id, turn_idx, judge_key, audio_bytes
+        )
+    except Exception as e:
+        print(f"[cos] upload_audio failed: {e}", flush=True)
+
+
 def build_agent(session: Session) -> Agent:
     initial_llm = make_llm_for_judge(session.current_judge_key, session.mood)
 
     agent = Agent(
         edge=build_edge(),
         agent_user=User(name="Shark Tank Judge", id="shark-tank-agent"),
-        instructions="",  # system instruction lives inside each judge's LLM config
+        instructions="",
         llm=initial_llm,
         turn_detection=smart_turn.TurnDetection(),
     )
 
+    _audio_buffer: list[bytes] = []
+
     @agent.subscribe
-    async def on_turn_end(event: RealtimeUserSpeechTranscriptionEvent):
+    async def on_user_turn_end(event: RealtimeUserSpeechTranscriptionEvent):
         start = time.monotonic()
         transcript = event.text or ""
 
-        # Update mood snapshot
-        session.mood = get_mood()
-
-        # Pick next judge and rotate
         next_judge = judges.pick_next_judge(session.turn_index, session.mood)
         latency_ms = int((time.monotonic() - start) * 1000)
 
@@ -186,102 +253,100 @@ def build_agent(session: Session) -> Agent:
 
         session.record(transcript, next_judge, latency_ms)
 
-        # Swap judge LLM if judge changed
         if next_judge != session.current_judge_key:
             session.current_judge_key = next_judge
-            new_llm = make_llm_for_judge(next_judge, session.mood)
-            # Hot-swap: if Vision Agents supports it this takes effect next turn.
-            # If not, plan B is rebuilding the agent -- acceptable 1-2s dead air.
-            agent.llm = new_llm
+            agent.llm = make_llm_for_judge(next_judge, session.mood)
             print(f"  judge swapped -> {next_judge}", flush=True)
 
         session.turn_index += 1
 
-        # COS upload (stubbed until creds arrive)
-        audio_bytes: bytes = b""  # P2: capture from agent audio output
-        response_text: str = ""   # P2: capture from agent transcript event
-        _upload_audio_stub(session.id, session.turn_index - 1, next_judge, audio_bytes)
+        await _emit_to_p3({
+            "type": "judge",
+            "judge": next_judge,
+            "mood": round(session.mood, 3),
+            "turn_idx": session.turn_index,
+        })
 
-        # Websocket emit to P3: {judge, text, audio}
-        ws_payload = {"judge": next_judge, "text": response_text, "audio": audio_bytes}
-        _emit_to_p3(ws_payload)
+    @agent.subscribe
+    async def on_audio_chunk(event: RealtimeAudioOutputEvent):
+        if event.data is not None and event.data.samples is not None:
+            raw = event.data.samples.tobytes()
+            if raw:
+                _audio_buffer.append(raw)
+
+    @agent.subscribe
+    async def on_audio_done(event: RealtimeAudioOutputDoneEvent):
+        if event.interrupted or not _audio_buffer:
+            _audio_buffer.clear()
+            return
+        audio_bytes = b"".join(_audio_buffer)
+        _audio_buffer.clear()
+        judge_key = session.current_judge_key
+        turn_idx = max(0, session.turn_index - 1)
+        asyncio.create_task(_cos_upload_audio(session.id, turn_idx, judge_key, audio_bytes))
+
+    @agent.subscribe
+    async def on_agent_speech(event: RealtimeAgentSpeechTranscriptionEvent):
+        if event.mode == "final" and event.text:
+            print(f"  [judge speech] {event.text!r}", flush=True)
+            await _emit_to_p3({
+                "type": "transcript",
+                "judge": session.current_judge_key,
+                "text": event.text,
+                "mood": round(session.mood, 3),
+                "turn_idx": session.turn_index,
+            })
 
     return agent
 
 
-def _emit_to_p3(payload: dict) -> None:
-    """Send {judge, text, audio} to the P3 browser frontend over websocket.
-    Stubbed -- P2 wires the real websocket server here."""
-    print(f"[ws -> P3] judge={payload['judge']}  text={payload['text']!r}", flush=True)
-
-
 # ---------------------------------------------------------------------------
-# Join-call with REST polling (waits for a human before connecting the agent)
+# Join call via TRTC room
 # ---------------------------------------------------------------------------
 
-async def join_call(
-    agent: Agent,
-    session: Session,
-    call_type: str = "default",
-    call_id: str = "sharktank-dev",
-) -> None:
-    call = await agent.create_call(call_type, call_id)
+async def join_call(agent: Agent, session: Session) -> None:
+    # Derive a uint32 numeric room ID from session hex ID (8 hex chars = 32 bits)
+    room_id = int(session.id, 16)
 
-    api_key = os.environ["STREAM_API_KEY"]
-    api_secret = os.environ["STREAM_API_SECRET"]
-    token = StreamClient(api_key=api_key, api_secret=api_secret).create_token("demo-user")
-    url = (
-        "https://getstream.io/video/demos/join/"
-        + call.id
-        + "?"
-        + urlencode({
-            "api_key": api_key,
-            "token": token,
-            "skip_lobby": "true",
-            "user_name": "Founder",
-        })
-    )
+    founder_user_id = "founder-" + uuid.uuid4().hex[:8]
+    creds = trtc_mod.make_room_credentials(room_id=room_id, user_id=founder_user_id)
 
-    print(f"\n🔗 Open this URL in your browser:\n  {url}\n", flush=True)
-    print(f"Session ID: {session.id}", flush=True)
-    print("Polling for participant -- agent connects once you join...\n", flush=True)
+    print(f"\nSession ID:   {session.id}", flush=True)
+    print(f"TRTC Room ID: {room_id}", flush=True)
+    print(f"\nOpen the frontend:\n  http://localhost:8000/?room_id={room_id}\n", flush=True)
 
-    # Poll REST API until a human participant is present
-    sync_call = StreamClient(api_key=api_key, api_secret=api_secret).video.call(call_type, call_id)
-    while True:
-        try:
-            resp = sync_call.get()
-            # resp.data.call.session.participants is the live list of active
-            # WebRTC participants in the current session
-            session_obj = getattr(resp.data.call, "session", None)
-            participants = getattr(session_obj, "participants", []) or []
-            human_participants = [
-                p for p in participants
-                if getattr(getattr(p, "user", None), "id", None) != "shark-tank-agent"
-            ]
-            if human_participants:
-                names = [getattr(getattr(p, "user", None), "id", "?") for p in human_participants]
-                print(f"[poll] human participants detected: {names}", flush=True)
-                break
-        except Exception as e:
-            print(f"[poll] error: {e}", flush=True)
-        await asyncio.sleep(2)
+    await _emit_to_p3({
+        "type": "room_ready",
+        "room_id": room_id,
+        "sdk_app_id": creds["sdk_app_id"],
+        "user_id": creds["user_id"],
+        "user_sig": creds["user_sig"],
+    })
 
-    print("Participant detected -- agent joining call...\n", flush=True)
+    # call_id as decimal string -> TencentEdge.create_call converts to int room_id
+    call = await agent.create_call("default", str(room_id))
 
-    async with agent.join(call):
+    print("Waiting for founder to join the TRTC room...\n", flush=True)
+    async with agent.join(call, participant_wait_timeout=None):
         await agent.finish()
 
-    # Session end: upload full log (stubbed)
-    _upload_session_stub(session.id, session.to_dict())
+    try:
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(
+            None, cos.upload_session, session.id, session.to_dict()
+        )
+        print(f"Session log uploaded for {session.id}", flush=True)
+    except Exception as e:
+        print(f"[cos] upload_session failed: {e}", flush=True)
+
     print(f"\nSession {session.id} complete. Turns: {session.turn_index}", flush=True)
 
 
 # ---------------------------------------------------------------------------
-# Entry point
+# Entry point (called from main.py via run_agent, or directly)
 # ---------------------------------------------------------------------------
 
-async def run() -> None:
+async def run_agent() -> None:
     session = Session()
     agent = build_agent(session)
     print(
@@ -289,7 +354,19 @@ async def run() -> None:
         f"voice={_JUDGES_EXPORT[session.current_judge_key]['gemini_voice']}",
         flush=True,
     )
-    await join_call(agent, session)
+    mood_task = asyncio.create_task(_mood_loop(session))
+    try:
+        await join_call(agent, session)
+    finally:
+        mood_task.cancel()
+        try:
+            await mood_task
+        except asyncio.CancelledError:
+            pass
+
+
+async def run() -> None:
+    await run_agent()
 
 
 if __name__ == "__main__":
