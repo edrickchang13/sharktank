@@ -174,6 +174,12 @@ async def ws_endpoint(websocket: WebSocket):
                 continue
             if msg.get("type") == "mood_frame" and isinstance(msg.get("image"), str):
                 asyncio.create_task(_handle_mood_frame(msg["image"]))
+            elif msg.get("type") == "user_paused":
+                paused = msg.get("paused")
+                if _session is None or not isinstance(paused, bool):
+                    continue
+                _session.paused = paused
+                print(f"[ws] user paused={paused}", flush=True)
     except WebSocketDisconnect:
         pass
     except Exception as e:
