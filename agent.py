@@ -210,8 +210,15 @@ def build_edge():
 
     if _TENCENT_AVAILABLE and trtc_app_id and trtc_secret:
         try:
-            edge = _tencent_mod.Edge(sdk_app_id=int(trtc_app_id), key=trtc_secret)
-            print("Edge: Tencent TRTC", flush=True)
+            # video_fps=1 caps how often the agent samples the founder's
+            # video for Gemini. Matches gemini.Realtime(fps=1) and reduces
+            # liteav's per-frame buffering load.
+            edge = _tencent_mod.Edge(
+                sdk_app_id=int(trtc_app_id),
+                key=trtc_secret,
+                video_fps=1,
+            )
+            print("Edge: Tencent TRTC (video_fps=1)", flush=True)
             return edge
         except Exception as e:
             print(
@@ -305,8 +312,11 @@ def build_agent(session: Session) -> Agent:
         if event.interrupted or not _audio_buffer:
             _audio_buffer.clear()
             _is_speaking["value"] = False
+            # If the founder cut Cuban off mid-sentence, fire a distinct
+            # event so the frontend can flash an "interrupted" badge and
+            # the user sees the judge actually heard them in real time.
             await _emit_to_p3({
-                "type": "speaking_end",
+                "type": "judge_interrupted" if event.interrupted else "speaking_end",
                 "judge": session.current_judge_key,
             })
             return
