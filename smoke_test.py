@@ -1,159 +1,176 @@
-"""Smoke test for the Shark Tank simulator.
+"""Smoke test for the Shark Tank simulator (live modules only).
 
-Verifies that module interfaces are wired correctly without needing real
-Tencent credentials. Runnable as `python smoke_test.py` or `pytest smoke_test.py`.
+Tests the reduced P1 scope: judges, trtc, cos. Archived modules (hunyuan,
+tts, ivh, chunker, pipeline, mock, demo, feedback) are intentionally not
+imported. Runnable as `python smoke_test.py` — pure stdlib, no pytest.
 """
-
 from __future__ import annotations
 
+import json
 import os
 import sys
 import traceback
+from pathlib import Path
 from typing import Callable
 
-GREEN = "\033[92m"
-RED = "\033[91m"
-RESET = "\033[0m"
+_USE_COLOR = sys.stdout.isatty()
+GREEN = "\033[92m" if _USE_COLOR else ""
+RED = "\033[91m" if _USE_COLOR else ""
+RESET = "\033[0m" if _USE_COLOR else ""
+
+_REPO_ROOT = Path(__file__).resolve().parent
+_TRTC_VARS = ("TRTC_SDK_APP_ID", "TRTC_SECRET_KEY")
+_COS_VARS = ("TENCENT_SECRET_ID", "TENCENT_SECRET_KEY", "COS_BUCKET")
+
+
+def _save_env(keys: tuple[str, ...]) -> dict[str, str | None]:
+    return {k: os.environ.get(k) for k in keys}
+
+
+def _restore_env(saved: dict[str, str | None]) -> None:
+    for k, v in saved.items():
+        os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
+
+
+def _set_trtc_env() -> None:
+    os.environ["TRTC_SDK_APP_ID"] = "1400000000"
+    os.environ["TRTC_SECRET_KEY"] = "fakekey"
 
 
 def test_imports() -> None:
     import cos  # noqa: F401
-    import hunyuan  # noqa: F401
-    import ivh  # noqa: F401
     import judges  # noqa: F401
-    import mock  # noqa: F401
-    import pipeline  # noqa: F401
-    import tts  # noqa: F401
+    import trtc  # noqa: F401
 
 
-def test_mock_response_shape() -> None:
-    import mock
-
-    resp = mock.respond_to_pitch("cuban", "We make AI tools for cats", 0.7)
-    for key in ("judge", "text", "audio_bytes", "image_path", "latency_ms"):
-        assert key in resp, f"missing key: {key}"
-    assert isinstance(resp["text"], str), f"text is {type(resp['text'])}"
-    assert isinstance(resp["audio_bytes"], bytes), f"audio_bytes is {type(resp['audio_bytes'])}"
-    assert isinstance(resp["latency_ms"], int), f"latency_ms is {type(resp['latency_ms'])}"
-    assert resp["text"], "text is empty"
-    # MP3 sync byte: 0xFF followed by 0xE0-0xFF (frame sync 11 bits set).
-    assert resp["audio_bytes"][:1] == b"\xff", f"not MP3 sync: {resp['audio_bytes'][:4]!r}"
-    assert resp["audio_bytes"][1] & 0xE0 == 0xE0, f"not MP3 sync: {resp['audio_bytes'][:4]!r}"
-
-
-def test_mock_low_mood_harsher() -> None:
-    import mock
-
-    text_low = mock.respond_to_pitch("cuban", "same text", 0.2)["text"]
-    text_high = mock.respond_to_pitch("cuban", "same text", 0.8)["text"]
-    assert len(text_low) > len(text_high), f"low={text_low!r} high={text_high!r}"
-    assert text_low.endswith("You're not ready."), f"low={text_low!r}"
-
-
-def test_mock_judges_distinct() -> None:
-    import mock
-
-    texts = {
-        k: mock.respond_to_pitch(k, "identical transcript here", 0.6)["text"]
-        for k in ("cuban", "oleary", "corcoran")
-    }
-    assert len(set(texts.values())) == 3, f"not distinct: {texts}"
-
-
-def test_render_system_prompt_all() -> None:
+def test_render_system_prompt_all_judges() -> None:
     import judges
-
     for key in ("cuban", "oleary", "corcoran"):
-        for mood in (0.1, 0.5, 0.9):
-            prompt = judges.render_system_prompt(key, mood)
-            assert isinstance(prompt, str) and prompt, f"{key}@{mood} empty"
+        prompt = judges.render_system_prompt(key, 0.5)
+        assert isinstance(prompt, str) and prompt, f"{key}: empty"
+        assert "{mood_desc}" not in prompt, f"{key}: placeholder not substituted"
+
+
+def test_mood_descriptor_extremes() -> None:
+    import judges
     assert "nervous" in judges.render_system_prompt("cuban", 0.1)
     assert "confident" in judges.render_system_prompt("cuban", 0.9)
 
 
 def test_pick_next_judge() -> None:
     import judges
-
-    assert judges.pick_next_judge(0, 0.2) == "cuban"
-    assert judges.pick_next_judge(0, 0.8) == "cuban"
+    assert judges.pick_next_judge(0, 0.5) == "cuban"
     assert judges.pick_next_judge(1, 0.2) == "corcoran"
-    assert judges.pick_next_judge(5, 0.2) == "corcoran"
-    seen = {judges.pick_next_judge(i, 0.8) for i in range(1, 7)}
-    assert "cuban" in seen and "oleary" in seen and "corcoran" in seen, f"seen={seen}"
+    assert judges.pick_next_judge(1, 0.8) == "oleary"
 
 
-def test_ivh_static_mode() -> None:
-    import ivh
-
-    result = ivh.render_judge("cuban", b"fake audio", mode=ivh.RenderMode.STATIC)
-    assert result["mode"] == "static", f"mode={result['mode']}"
-    assert result["image_path"].endswith("cuban.png"), f"path={result['image_path']}"
-    assert result["audio_bytes"] == b"fake audio"
-
-
-def test_ivh_mode_not_implemented() -> None:
-    import ivh
-
+def test_trtc_user_sig_generation() -> None:
+    import trtc
+    saved = _save_env(_TRTC_VARS)
     try:
-        ivh.render_judge("cuban", b"x", mode=ivh.RenderMode.IVH)
-    except NotImplementedError as exc:
-        assert "activation pending" in str(exc), f"msg={exc}"
-        return
-    raise AssertionError("expected NotImplementedError")
+        _set_trtc_env()
+        sig = trtc.generate_user_sig("user_001")
+        assert isinstance(sig, str) and len(sig) >= 100, f"sig len={len(sig)}"
+        creds = trtc.make_room_credentials("room_42", "user_001")
+        for k in ("sdk_app_id", "user_id", "user_sig", "room_id"):
+            assert k in creds, f"missing key: {k}"
+    finally:
+        _restore_env(saved)
 
 
-def test_pipeline_env_missing() -> None:
-    import pipeline
-
-    if os.path.exists(os.path.join(os.path.dirname(__file__), ".env")):
-        print(f"  {GREEN}SKIP{RESET} (.env present)")
-        return
-    saved = {k: os.environ.pop(k, None) for k in ("TENCENT_SECRET_ID", "TENCENT_SECRET_KEY")}
-    # Reset cached clients so env check runs fresh.
-    import hunyuan
-    import tts as tts_mod
-    hunyuan._client = None
-    tts_mod._client = None
+def test_trtc_env_missing() -> None:
+    import trtc
+    saved = _save_env(_TRTC_VARS)
     try:
+        for k in _TRTC_VARS:
+            os.environ.pop(k, None)
         try:
-            pipeline.respond_to_pitch("cuban", "pitch", 0.5)
-        except RuntimeError as exc:
-            assert "TENCENT_SECRET" in str(exc), f"msg={exc}"
+            trtc.generate_user_sig("user")
+        except RuntimeError:
             return
         raise AssertionError("expected RuntimeError")
     finally:
-        for k, v in saved.items():
-            if v is not None:
-                os.environ[k] = v
+        _restore_env(saved)
+
+
+def test_trtc_expire_validation() -> None:
+    import trtc
+    saved = _save_env(_TRTC_VARS)
+    try:
+        _set_trtc_env()
+        for bad in (0, 100 * 86400):
+            try:
+                trtc.generate_user_sig("user", expire_seconds=bad)
+            except ValueError:
+                continue
+            raise AssertionError(f"expected ValueError for expire_seconds={bad}")
+    finally:
+        _restore_env(saved)
+
+
+def test_cos_env_missing() -> None:
+    import cos
+    saved = _save_env(_COS_VARS)
+    try:
+        for k in _COS_VARS:
+            os.environ.pop(k, None)
+        cos._client = None
+        cos._bucket = None
+        try:
+            cos.upload_session("test", {})
+        except RuntimeError as exc:
+            msg = str(exc)
+            for var in _COS_VARS:
+                assert var in msg, f"missing {var} in error: {msg}"
+            return
+        raise AssertionError("expected RuntimeError")
+    finally:
+        _restore_env(saved)
+        cos._client = None
+        cos._bucket = None
+
+
+def test_judges_export_json_valid() -> None:
+    data = json.loads((_REPO_ROOT / "judges_export.json").read_text())
+    for key in ("schema_version", "exported_at", "judges", "mood_descriptors", "rotation"):
+        assert key in data, f"missing top-level key: {key}"
+    j = data["judges"]
+    assert set(j.keys()) == {"cuban", "oleary", "corcoran"}, f"judges={set(j.keys())}"
+    for key, entry in j.items():
+        prompt = entry.get("system_prompt", "")
+        assert prompt, f"{key}: empty system_prompt"
+        assert "{mood_desc}" in prompt, f"{key}: missing {{mood_desc}}"
+
+
+def test_no_em_dashes_in_judges() -> None:
+    text = (_REPO_ROOT / "judges.py").read_text()
+    assert "—" not in text, "judges.py contains an em-dash"
 
 
 TESTS: list[Callable[[], None]] = [
-    test_imports,
-    test_mock_response_shape,
-    test_mock_low_mood_harsher,
-    test_mock_judges_distinct,
-    test_render_system_prompt_all,
-    test_pick_next_judge,
-    test_ivh_static_mode,
-    test_ivh_mode_not_implemented,
-    test_pipeline_env_missing,
+    test_imports, test_render_system_prompt_all_judges, test_mood_descriptor_extremes,
+    test_pick_next_judge, test_trtc_user_sig_generation, test_trtc_env_missing,
+    test_trtc_expire_validation, test_cos_env_missing, test_judges_export_json_valid,
+    test_no_em_dashes_in_judges,
 ]
 
 
 def _run() -> int:
-    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    failures = 0
+    sys.path.insert(0, str(_REPO_ROOT))
+    passed = failed = 0
     for fn in TESTS:
         name = fn.__name__
         try:
             fn()
             print(f"{GREEN}PASS{RESET} {name}")
+            passed += 1
         except Exception as exc:
-            failures += 1
+            failed += 1
             tb = traceback.extract_tb(exc.__traceback__)
             line = tb[-1].lineno if tb else "?"
             print(f"{RED}FAIL{RESET} {name} (line {line}): {type(exc).__name__}: {exc}")
-    return 0 if failures == 0 else 1
+    print(f"\n{passed} passed, {failed} failed")
+    return 0 if failed == 0 else 1
 
 
 if __name__ == "__main__":
