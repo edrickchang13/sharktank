@@ -1,155 +1,103 @@
 # Shark Tank Pitch Simulator
 
-Built at ACM x AIC Hack-A-Stack, May 16 2026, 6-hour sprint. Sponsor tracks: Tencent Cloud and GetStream.
+Built at ACM x AIC Hack-A-Stack at SCU, May 16 2026, 6-hour sprint track. Sponsor tracks: Tencent Cloud (judge side) and GetStream Vision Agents (user side). After two rounds of stack changes, P1's scope shrank to credentials handoff and Tencent COS session logging. Runtime orchestration now lives in Vision Agents (P2).
 
 ## What this is
 
-A live pitch simulator where you stand in front of your webcam and three AI judge avatars (Mark Cuban, Kevin O'Leary, Barbara Corcoran) grill you in real time. GetStream's vision agent reads your face for confidence and feeds a mood score to a Tencent Hunyuan LLM, which generates each judge's response in character. Tencent TTS speaks the line in a distinct voice per judge, and Tencent IVH (or a static headshot fallback) animates the avatar. Sessions log to Tencent COS for replay.
+A live pitch simulator where a user pitches a startup against three AI judges (Cuban, O'Leary, Corcoran). Vision Agents owns the realtime loop: webcam capture, VAD, Gemini Live as the sole LLM, ElevenLabs TTS, and a websocket out to the browser frontend. P1's repo holds the credentials, the COS logging module, and the judge system prompts that P2 drops into Vision Agents.
 
-## Architecture
+## Stack diagram
 
 ```
-+---------------+      webcam + mic         +-------------------------+
-|  User (P3 UI) | ------------------------> |  GetStream Vision (P2)  |
-| OpenCV/pyaudio|                           |  VAD, ASR, mood score   |
-+---------------+                           +-----------+-------------+
-        ^                                               |
-        |                                               | on_turn_end(transcript)
-        |                                               | get_mood() -> float
-        |                                               v
-        |                                  +------------------------------+
-        |                                  | pipeline.respond_to_pitch    |
-        |                                  | (P1 orchestrator)            |
-        |                                  +--------------+---------------+
-        |                                                 |
-        |          +--------------------+-----------------+--------------------+
-        |          v                    v                                     v
-        |   +------------+      +---------------+                      +-------------+
-        |   |  Hunyuan   | ---> |     TTS       | ----audio bytes----> |     IVH     |
-        |   |  (text)    |      |  (mp3 bytes)  |                      | (or STATIC) |
-        |   +------------+      +---------------+                      +------+------+
-        |                                                                     |
-        |                              +--------------+                       |
-        |                              |     COS      | <----session log------+
-        |                              | (session log)|                       |
-        |                              +--------------+                       |
-        |                                                                     |
-        +---------------- {text, audio_bytes, image_path, ...} ---------------+
+User webcam + mic
+    |
+    v
+Vision Agents (P2)
+    - tencent.Edge() WebRTC transport (using P1's TRTC creds)
+    - gemini.Realtime(fps=3)  sole LLM, reads webcam, judges respond
+    - elevenlabs.TTS(voice_id) swapped per active judge (P1's voice IDs)
+    - smart-turn VAD
+    - mood processor (webcam snapshots every ~3s)
+    - websocket to P3: { judge, text, audio }
+    |
+    | also calls: cos.upload_audio() + cos.upload_session() (P1 module)
+    v
+P3 browser frontend
+    - split-screen layout
+    - 6 pixel-art images (idle + talking per judge)
+    - audio play + image swap logic
+    - rolling transcript overlay
+    - confidence bar (live mood)
+    - feedback end screen from COS data
 ```
 
-## Quickstart with mock (P3 can unblock immediately)
+## P1's deliverables
+
+P1 hands four things over the wall to P2:
+
+- **TRTC credentials**: `TRTC_SDK_APP_ID` plus `TRTC_SECRET_KEY` for `tencent.Edge()` WebRTC transport.
+- **ElevenLabs config**: `ELEVENLABS_API_KEY` plus the three voice IDs (`ELEVENLABS_VOICE_CUBAN`, `ELEVENLABS_VOICE_OLEARY`, `ELEVENLABS_VOICE_CORCORAN`) for `elevenlabs.TTS()`.
+- **Judge system prompts**: serialized as `judges_export.json` for P2 to load directly into Vision Agents' `instructions` field. P1 does not execute these at runtime.
+- **Live COS endpoints**: the `cos.py` module exposes session JSON and per-turn audio uploads with presigned URLs. P2 calls these from inside Vision Agents.
+
+## Quickstart
 
 ```bash
-pip install -r requirements.txt
-python -c "from mock import respond_to_pitch; print(respond_to_pitch('cuban', 'We do AI for cats', 0.7))"
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+cp .env.example .env  # then fill in
+.venv/bin/python smoke_test.py
 ```
 
-The mock returns the same shape as the real pipeline (`{judge, text, audio_bytes, image_path, latency_ms}`) with a silent MP3 stub. P3 can wire the frontend against this, then flip the import when Tencent keys land.
+`smoke_test.py` verifies that `trtc.py`, `cos.py`, and `judges.py` still wire together cleanly. It does not need any LLM or TTS credentials, only Tencent Cloud + TRTC keys.
 
-## Real pipeline setup
+## Required env vars
 
-1. Copy the env template:
-   ```bash
-   cp .env.example .env
-   ```
-2. Get Tencent CAM keys at https://console.cloud.tencent.com/cam. The same `TENCENT_SECRET_ID` and `TENCENT_SECRET_KEY` are used by Hunyuan, TTS, and COS.
-3. Activate each Tencent service in the console (see gotchas table below). For IVH, open a pre-sales ticket as early as possible since approval can take hours.
-4. Get TRTC credentials from https://console.trtc.io. This is a separate console from Tencent Cloud proper. Free tier is 10k minutes per month.
-5. Pick 3 voice IDs from the Tencent TTS voice catalog at https://www.tencentcloud.com/document/product/1154 and plug them into `TTS_VOICE_CUBAN`, `TTS_VOICE_OLEARY`, `TTS_VOICE_CORCORAN`.
-6. Create a COS bucket in `ap-guangzhou` and set `COS_BUCKET`.
-7. In P3's frontend, swap the import:
-   ```python
-   # from mock import respond_to_pitch
-   from pipeline import respond_to_pitch
-   ```
+Mirror the names in `.env.example` exactly.
 
-## Service activation gotchas
+| Var | Owner | Used for |
+| - | - | - |
+| `TENCENT_SECRET_ID` | P1 self | COS auth |
+| `TENCENT_SECRET_KEY` | P1 self | COS auth |
+| `TRTC_SDK_APP_ID` | P1 -> P2 | `tencent.Edge()` WebRTC transport |
+| `TRTC_SECRET_KEY` | P1 -> P2 | UserSig signing for TRTC |
+| `ELEVENLABS_API_KEY` | P1 -> P2 | `elevenlabs.TTS()` |
+| `ELEVENLABS_VOICE_CUBAN` | P1 -> P2 | Cuban voice (default Brian, deep confident male) |
+| `ELEVENLABS_VOICE_OLEARY` | P1 -> P2 | O'Leary voice (default Bill, dry authoritative) |
+| `ELEVENLABS_VOICE_CORCORAN` | P1 -> P2 | Corcoran voice (default Alice, confident female) |
+| `COS_BUCKET` | P1 self | Session JSON + per-turn audio bucket |
+| `COS_REGION` | P1 self | Defaults to `ap-guangzhou` |
 
-| Service | Activation | Notes |
-|---|---|---|
-| Hunyuan | Instant | `hunyuan-lite` is cheapest and fastest. Use it for the hackathon. |
-| TTS | Instant | Pick voice IDs from the catalog and plug into env. No personality descriptors in the catalog, may need to audition by ear. |
-| IVH | Slow, may need pre-sales contact | Falls back to static headshots + audio playback. Already wired in `ivh.py`. |
-| COS | Instant | Create one bucket in `ap-guangzhou`. |
-| TRTC | Instant, separate account on trtc.io | Free tier 10k min/month. |
+P2 provides their own `GOOGLE_API_KEY` (for `gemini.Realtime()`) and `STREAM_API_KEY` plus `STREAM_API_SECRET` (for Vision Agents itself). Those do not live in this repo.
 
-## TRTC MCP server
+## Handoff to P2
 
-Tencent ships an MCP server at `@tencent-rtc/mcp` that handles UserSig generation. Add it so Claude Code can mint test credentials directly:
+The full credential package, the three judge prompts, and the cos.py call signatures are bundled in [`HANDOFF_TO_P2.md`](./HANDOFF_TO_P2.md). The JSON form of the prompts lives in [`judges_export.json`](./judges_export.json). Read those two files first when wiring P1 into Vision Agents.
 
-```bash
-claude mcp add tencent-rtc -e SDKAPPID=YOUR_ID -e SECRETKEY=YOUR_KEY
-```
+## Live files in this repo
 
-## Interfaces P1 exposes to P3
+- `judges.py` is the source of truth for the three judge system prompts.
+- `judges_export.json` is the JSON dump P2 consumes.
+- `trtc.py` generates UserSig with pure stdlib HMAC-SHA256, server-side only.
+- `cos.py` handles session JSON and per-turn audio upload, plus presigned URLs.
+- `smoke_test.py` checks that trtc, cos, and judges still load and behave.
+- `HANDOFF_TO_P2.md` is the credential and config handoff package.
+- `CLAUDE.md` is the project tracker, loaded automatically by Claude Code.
+- `archive/` holds obsolete modules from the pre-pivot stack. Kept for git history only.
 
-```python
-# pipeline.py
+## What was archived and why
 
-def respond_to_pitch(
-    judge_key: str,                  # 'cuban' | 'oleary' | 'corcoran'
-    transcript: str,                 # what the user just said
-    mood: float,                     # 0-1 from GetStream, 0 = nervous, 1 = confident
-    history: list[dict] | None = None,
-    render_mode: ivh.RenderMode = ivh.RenderMode.STATIC,
-) -> dict:
-    """
-    Returns:
-      {
-        "judge":       str,    # echoed judge_key
-        "text":        str,    # 2-3 sentence response
-        "audio_bytes": bytes,  # MP3 of the spoken response
-        "image_path":  str,    # path to static headshot (STATIC mode)
-        "video_url":   str,    # populated only in IVH mode
-        "latency_ms":  int,    # end-to-end pipeline latency
-      }
-    """
+| File | Why archived |
+| - | - |
+| `hunyuan.py` | Hunyuan dropped, Gemini Live is the sole LLM |
+| `tts.py` | Tencent TTS replaced by ElevenLabs |
+| `ivh.py` | IVH dropped, 2D pixel-art images replace avatars (P3 builds 6 total: idle + talking per judge) |
+| `chunker.py` | Existed for Tencent TTS 500-char limit, no longer needed |
+| `pipeline.py` | Orchestration moved into Vision Agents (P2) |
+| `mock.py` / `demo.py` | P1 no longer runs a pipeline, Vision Agents drives the loop |
+| `feedback.py` | End screen moved to P3's browser frontend |
 
-def log_session(session_id: str, session_data: dict) -> str:
-    """Persist the full session log to COS. Returns a presigned URL (1hr)."""
+## Risks and open questions
 
-def log_turn_audio(
-    session_id: str,
-    turn_idx: int,
-    judge_key: str,
-    audio_bytes: bytes,
-) -> str:
-    """Persist one turn's audio to COS. Returns a presigned URL."""
-```
-
-`mock.respond_to_pitch` and `mock.log_session` have the same signatures.
-
-## What P1 needs from P2
-
-GetStream vision agent should expose two things:
-
-```python
-on_turn_end(transcript: str) -> None
-    # Fires when VAD detects the user finished speaking.
-    # transcript is the ASR output for that utterance.
-    # P1 picks the next judge and calls respond_to_pitch.
-
-get_mood() -> float
-    # Current confidence reading, 0 = very nervous, 1 = overconfident.
-    # P1 reads this right before calling Hunyuan so the judge adapts.
-```
-
-Judge selection lives in `judges.pick_next_judge(turn_index, mood)`. Cuban opens, Barbara picks up if the founder is below 0.4 mood, otherwise it rotates.
-
-## Risks and fallbacks
-
-- **IVH activation slow.** Pre-sales approval is the long pole. We default `render_mode` to `RenderMode.STATIC`, which returns a headshot path plus audio bytes. The frontend renders that as a still image with audio playback. Demo still works, just less flashy. Flip to `RenderMode.IVH` only once activation is confirmed.
-- **End-to-end latency 2-4s.** Hunyuan + TTS + IVH stack up. Mask the gap with VAD turn-taking (don't fire until the user clearly stops) and idle judge animations on the frontend (subtle blink/breath loops on the headshot).
-- **TTS voice catalog has 380+ voices but no personality descriptors.** Plan to spend 20 minutes auditioning to pick three voices that read as Cuban (gruff, fast), O'Leary (cold, clipped), Corcoran (warm, sharp). Once chosen, the IDs go in `.env` and never change.
-- **Hunyuan response shape.** Judge prompts cap at 2-3 sentences each. If a response comes back too long, truncate at the first sentence boundary past 200 chars rather than re-prompt, since re-prompting blows the latency budget.
-
-## Files
-
-- `judges.py` — judge personalities, mood-adapted system prompts, turn rotation
-- `hunyuan.py` — `chat(judge_key, transcript, mood, history)` -> text
-- `tts.py` — `synthesize_for_judge(text, judge_key)` -> MP3 bytes
-- `ivh.py` — `render_judge(judge_key, audio_bytes, mode)` with STATIC fallback
-- `cos.py` — session and per-turn audio upload, presigned URLs
-- `pipeline.py` — `respond_to_pitch()` orchestrator
-- `mock.py` — stand-in for P3 development
-- `.env.example` — required env vars
+- Does Vision Agents support hot-swapping the `instructions` field mid-session so the active judge can change without tearing down the connection? If not, the rotation logic moves into Gemini's own prompt and we lose per-judge isolation.
+- smart-turn VAD compatibility under `tencent.Edge()` is unverified. Vision Agents docs cover the GetStream transport path more thoroughly than the Tencent one.
+- The P2 to P3 websocket schema may need extra fields (`turn_idx`, `mood`, `session_id`) so P1's COS logging can stitch the session log together without a second source of truth.
