@@ -180,6 +180,7 @@ class Session:
     turn_index: int = 0
     current_judge_key: str = "cuban"
     mood: float = 0.5
+    paused: bool = False
     transcript_history: list[dict[str, Any]] = field(default_factory=list)
     _start_ts: float = field(default_factory=time.monotonic, repr=False)
 
@@ -265,6 +266,8 @@ def build_agent(session: Session) -> Agent:
 
     @agent.subscribe
     async def on_user_turn_end(event: RealtimeUserSpeechTranscriptionEvent):
+        if session.paused:
+            return
         start = time.monotonic()
         transcript = event.text or ""
 
@@ -296,6 +299,8 @@ def build_agent(session: Session) -> Agent:
 
     @agent.subscribe
     async def on_audio_chunk(event: RealtimeAudioOutputEvent):
+        if session.paused:
+            return
         if event.data is not None and event.data.samples is not None:
             if not _is_speaking["value"]:
                 _is_speaking["value"] = True
@@ -309,6 +314,8 @@ def build_agent(session: Session) -> Agent:
 
     @agent.subscribe
     async def on_audio_done(event: RealtimeAudioOutputDoneEvent):
+        if session.paused:
+            return
         if event.interrupted or not _audio_buffer:
             _audio_buffer.clear()
             _is_speaking["value"] = False
@@ -333,6 +340,8 @@ def build_agent(session: Session) -> Agent:
 
     @agent.subscribe
     async def on_agent_speech(event: RealtimeAgentSpeechTranscriptionEvent):
+        if session.paused:
+            return
         if event.mode == "final" and event.text:
             print(f"  [judge speech] {event.text!r}", flush=True)
             await _emit_to_p3({

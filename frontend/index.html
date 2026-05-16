@@ -514,6 +514,13 @@
     }
     .confidence-scale span { opacity: 0.7; }
 
+    #scene-line {
+      margin-top: 8px; font-size: 0.7rem; color: #6b7280; font-style: italic; line-height: 1.4;
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+      transition: opacity 280ms var(--ease-out);
+    }
+    body.paused #scene-line { opacity: 0.3; }
+
     /* ─────────────────────────────────────────────────────────────
        JUDGE panel
        ───────────────────────────────────────────────────────────── */
@@ -1016,6 +1023,7 @@
         </div>
         <div id="confidence-pct">50%</div>
       </div>
+      <div id="scene-line">—</div>
     </div>
   </div>
 
@@ -1272,9 +1280,7 @@ function handleMessage(msg) {
     case 'mood_update':
       // Per-frame mood + scene update from the browser-side capture loop
       setConfidence(msg.mood);
-      if (msg.scene) {
-        console.log('[scene]', msg.scene);
-      }
+      document.getElementById('scene-line').textContent = msg.scene || '—';
       break;
 
     case 'speaking_start':
@@ -1297,6 +1303,25 @@ function handleMessage(msg) {
           ovl.classList.remove('interrupted');
           ovl.textContent = '';
         }, 900);
+      }
+      break;
+
+    case 'judge_switching':
+      // Backend is closing the current Gemini session and reconnecting
+      // with the next judge's voice + system prompt. ~500ms-1s gap.
+      // Pre-emptively swap the visible portrait so the user sees who's
+      // coming on next instead of staring at the previous judge in silence.
+      swapJudge(msg.to);
+      setJudgeTalking(msg.to, false);
+      const switchOvl = document.getElementById('judge-status-overlay');
+      if (switchOvl) {
+        const nextName = (JUDGE_INFO[msg.to] && JUDGE_INFO[msg.to].name) || msg.to;
+        switchOvl.textContent = nextName.toUpperCase() + ' INCOMING';
+        switchOvl.classList.add('interrupted');
+        setTimeout(() => {
+          switchOvl.classList.remove('interrupted');
+          switchOvl.textContent = '';
+        }, 1400);
       }
       break;
   }
@@ -1382,9 +1407,47 @@ pauseBtn.addEventListener('click', () => {
   } catch (e) {
     console.warn('Pause toggle error:', e);
   }
+
+  // Silence (or restore) the judges' audio playback locally so a paused
+  // founder also stops hearing Cuban talking back.
+  try {
+    document.querySelectorAll('#remote-audio audio').forEach(a => {
+      a.muted = isPaused;
+    });
+  } catch (e) {
+    console.warn('Remote audio mute toggle error:', e);
+  }
+
+  // Tell the backend so server-side logic can react (e.g. stop generating
+  // judge responses while the user is paused).
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    try {
+      ws.send(JSON.stringify({ type: 'user_paused', paused: isPaused }));
+    } catch (e) {
+      console.warn('user_paused send error:', e);
+    }
+  }
+
   document.body.classList.toggle('paused', isPaused);
   pauseBtn.textContent = isPaused ? 'Resume' : 'Pause';
 });
+
+// Watch the remote audio sink so any <audio> element added by TRTC after
+// pause-start still gets muted while the user is paused.
+const remoteAudioSink = document.getElementById('remote-audio');
+if (remoteAudioSink && typeof MutationObserver !== 'undefined') {
+  const remoteAudioObserver = new MutationObserver((mutations) => {
+    if (!isPaused) return;
+    for (const m of mutations) {
+      m.addedNodes.forEach((node) => {
+        if (node && node.tagName === 'AUDIO') {
+          node.muted = true;
+        }
+      });
+    }
+  });
+  remoteAudioObserver.observe(remoteAudioSink, { childList: true, subtree: true });
+}
 
 // ---------------------------------------------------------------------------
 // Exit — tear everything down and show a goodbye overlay
