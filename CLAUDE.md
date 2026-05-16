@@ -11,6 +11,26 @@ Concretely:
 - Doc lookups, code generation for separate files, and research tasks always run in parallel
 - The orchestrator (you) writes glue code and integration after agents return
 
+## Live debug loop with Chrome MCP
+
+When the user asks to test the website or debug a UI/runtime issue, do not just describe the steps. Take over and run the loop yourself:
+
+1. **Start the local server** (or `ssh -L 8000:localhost:8000` to Abraham's DGX Spark if that is the testbed). Confirm it is listening before opening a browser.
+2. **Open the page in Chrome via `mcp__Claude_in_Chrome__*`** — DOM aware, much faster than pixel clicking. Computer-use cannot click into Chrome (tier read), so use Chrome MCP for the actual interaction. Computer-use screenshots are still useful for visual verification.
+3. **Read console + network errors** with `mcp__Claude_in_Chrome__read_console_messages` and `mcp__Claude_in_Chrome__read_network_requests`. These are the truth source for what is breaking.
+4. **Capture findings in a tight scratchpad** in this conversation: error message, file:line, root cause hypothesis. Do not push to KB or commit yet.
+5. **Fix in Claude Code** — open the relevant file, edit, save. Run `smoke_test.py` to confirm no regressions if the change touches `judges.py`, `trtc.py`, `cos.py`.
+6. **Reload the page in Chrome MCP** and re-check console. Repeat from step 3.
+7. **When the bug is fixed**, log a one-line entry in the CLAUDE.md decisions log with the timestamp and the root cause. Commit. Push only if the user said push.
+8. **Stop the loop** when the user says stop, when the page renders the demo flow end to end, or when you hit something that genuinely requires the user (credentials, browser permissions they have to grant, hardware on Abraham's machine).
+
+Guardrails:
+- Do not click links the user did not ask you to follow. The page is trusted but third-party redirects are not.
+- Do not modify Abraham's `agent.py` or `frontend/index.html` without flagging to the user first. He owns them.
+- If the bug is in P1 code (`cos.py`, `trtc.py`, `judges.py`, `judges_export.json`), fix directly.
+- If the bug is in `requirements.txt`, `.gitignore`, or env handling, fix directly.
+- Iteration cap: 8 rounds. If still broken after 8, write a status summary and ask the user for direction rather than grinding.
+
 ## Writing style
 
 - No em-dashes anywhere in code, prompts, or docs
@@ -119,7 +139,8 @@ See `.env.example`. Summary:
 
 ## Architecture decisions log (most recent first)
 
-1. **20:49** P2 integration findings logged. `tencent.Edge()` unstable on feat/tencent-rtc, P2 uses `getstream.Edge()` as actual transport. `gemini.Realtime()` silently disables ElevenLabs and SmartTurn (Gemini owns STT/TTS/VAD). Stream SFU requires browser-first join (agent times out against empty room). `asyncio.run_in_executor(None, input)` fails under `uv run`. P2 polls Stream REST API for participant presence.
+1. **22:40** P1 ran Chrome MCP debug loop against p2-agent branch in a git worktree. Four iterations. Findings: (a) Abraham's `requirements.txt` is missing `websockets` (or `uvicorn[standard]`) — frontend hits WS 404 and reconnect-loops every 2s without it. (b) `assets/judges/*.png` are 0-byte placeholders, browser shows broken-image icon until replaced; generated colored stand-ins as `main_stub` smoke test fixture. (c) Frontend has NO `getUserMedia` or `mood_frame` capture — mood is captured server-side via `cv2.VideoCapture(0)` in `agent.py`, meaning only the machine running `main.py` sees a webcam. (d) Local webcam panel is empty by design (TRTC is receive-only on the browser side, mic goes through WebRTC track to Gemini). (e) After clicking Join Pitch Room and granting clicks, TRTC and WS both go green, judge image swaps, transcript updates, confidence bar moves. End-to-end visible UI works with a stub backend.
+2. **20:49** P2 integration findings logged. `tencent.Edge()` unstable on feat/tencent-rtc, P2 uses `getstream.Edge()` as actual transport. `gemini.Realtime()` silently disables ElevenLabs and SmartTurn (Gemini owns STT/TTS/VAD). Stream SFU requires browser-first join (agent times out against empty room). `asyncio.run_in_executor(None, input)` fails under `uv run`. P2 polls Stream REST API for participant presence.
 2. **20:00** Separate TTS plugin dropped. Vision Agents gemini.Realtime ships with response_modalities=[AUDIO] by default. Single API call produces both judge text and audio. Per-judge voice swap via voice_name param (Charon/Orus/Aoede).
 3. **19:44** Hunyuan dropped entirely. Gemini Live becomes sole LLM. Judge prompts move to Vision Agents `instructions` field. P1 scope reduces to creds handoff + COS logging.
 4. **19:30** Tencent IVH dropped (needs purchased avatar key). HeyGen dropped. P3 builds custom 2D pixel images (6 total). Tencent TTS dropped, replaced by an external TTS plugin (later dropped, see entry 2). Websocket schema locked: `{ judge, text, audio }`.
@@ -127,6 +148,10 @@ See `.env.example`. Summary:
 
 ## Known gotchas
 
+- **uvicorn needs `websockets`**: bare uvicorn refuses WS upgrades, returns 404 on `GET /ws`. Install `websockets` or use `uvicorn[standard]`. Abraham's `requirements.txt` on p2-agent is missing this.
+- **Mood capture is server-side**: `agent.py` uses `cv2.VideoCapture(0)` on the host running `main.py`. Browser does NOT send webcam frames. When the agent runs on DGX Spark and the user runs the browser on a Mac, the user's face is not visible to the mood model. Single-machine demos work, remote-agent demos do not get user mood.
+- **Local-video panel in frontend is intentionally empty**: browser TRTC join is receive-only, no local publish. Mic goes through WebRTC audio track to Gemini Live. The "YOU" panel label is misleading; consider relabeling.
+- **Judge images are 0-byte placeholders on p2-agent**: P3 replaces with pixel art. For testing, generate temporary colored PNGs (see scripts in worktree).
 - **Transport fallback**: `tencent.Edge()` unstable on feat/tencent-rtc as of May 16. Primary transport in practice is `getstream.Edge()` with Stream API key. Tencent creds still attempted first.
 - **gemini.Realtime takes over STT/TTS/VAD**: do not add `smart_turn`, `elevenlabs`, or any STT/TTS plugin to the agent config. They get silently disabled. Gemini handles all voice internally with 24kHz PCM output.
 - **Stream SFU join order**: browser must join the call first. Agent that joins first times out the room. P2 polls Stream REST API for participant presence and joins after.
