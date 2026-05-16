@@ -1,2 +1,9 @@
-cos-python-sdk-v5>=1.9.30
-python-dotenv>=1.0.0
+certifi==2026.2.25
+charset-normalizer==3.4.7
+idna==3.11
+mlx==0.31.0
+pillow==12.2.0
+python-dotenv==1.2.2
+requests==2.33.1
+urllib3==2.6.3
+wheel==0.46.3
