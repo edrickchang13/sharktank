@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Shark Tank Simulator</title>
-  <script src="https://web.sdk.qcloud.com/trtc/webrtc/v5/trtc.js"></script>
+  <script src="https://unpkg.com/trtc-js-sdk/trtc.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -268,6 +268,9 @@
   </div>
 </div>
 
+<!-- Hidden audio sink for TRTC remote stream playback -->
+<div id="remote-audio" style="display:none"></div>
+
 <div id="transcript-panel">
   <div id="transcript-header">LIVE TRANSCRIPT</div>
   <div id="transcript-log"></div>
@@ -347,38 +350,38 @@ async function startSession() {
 
     setupMsg.textContent = 'Credentials obtained — joining TRTC room...';
 
-    trtc = TRTC.create();
+    // Extract into named locals before createClient
+    const sdkAppId = creds.sdk_app_id;
+    const userId   = creds.user_id;
+    const userSig  = creds.user_sig;
 
-    // Remote audio: play it as soon as the judge's stream arrives
-    trtc.on(TRTC.EVENT.REMOTE_AUDIO_ADDED, async (event) => {
-      try {
-        const { userId, streamType } = event;
-        await trtc.startRemoteAudio({ userId, streamType });
-        console.log('Remote audio started for', userId);
-      } catch (e) {
-        console.warn('startRemoteAudio failed:', e);
-      }
+    // v4 SDK: createClient takes sdkAppId/userId/userSig, join takes roomId
+    trtc = TRTC.createClient({ mode: 'rtc', sdkAppId, userId, userSig });
+
+    // Wire handlers BEFORE join
+    trtc.on('stream-added', (event) => {
+      const stream = event.stream;
+      // Receive audio only — we are not publishing (mic goes through Gemini Live)
+      trtc.subscribe(stream, { audio: true, video: false });
     });
 
-    trtc.on(TRTC.EVENT.ERROR, (error) => {
+    trtc.on('stream-subscribed', (event) => {
+      // stream.play() injects an <audio> element into #remote-audio
+      event.stream.play('remote-audio');
+      console.log('Judge audio playing, id:', event.stream.getId());
+    });
+
+    trtc.on('stream-removed', (event) => {
+      event.stream.stop();
+    });
+
+    trtc.on('error', (error) => {
       console.error('TRTC error:', error);
-      setTrtcStatus('error', 'TRTC Error');
+      setTrtcStatus('red', 'TRTC Error');
     });
 
-    await trtc.enterRoom({
-      roomId:   ROOM_ID,
-      sdkAppId: creds.sdk_app_id,
-      userId:   creds.user_id,
-      userSig:  creds.user_sig,
-    });
-
-    // Publish local audio + video
-    await trtc.startLocalAudio();
-    try {
-      await trtc.startLocalVideo({ view: 'local-video' });
-    } catch (e) {
-      console.warn('Camera unavailable:', e);
-    }
+    // Join the room (receive-only, no local publish)
+    await trtc.join({ roomId: ROOM_ID });
 
     trtcReady = true;
     setTrtcStatus('green', `TRTC · ${ROOM_ID}`);
