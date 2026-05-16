@@ -1,50 +1,47 @@
-# P1 to P2 Handoff Package
+# Handoff to P2: Vision Agents Backend
 
-This file is the credential and config handoff from P1 (Tencent + ElevenLabs + COS) to P2 (Vision Agents on `feat/tencent-rtc` with Gemini Realtime). P1 owns the credentials and judge prompt content. P2 owns the live agent wiring on top of Vision Agents. Read this file, paste the env block, drop the judge prompts into Vision Agents `instructions`, and wire the rotation. Open questions are at the bottom.
+This doc is P1's package for P2, who owns the Vision Agents backend (tencent.Edge transport, Gemini Live LLM, smart-turn VAD, websocket to the browser frontend).
+
+The big change since the last revision: **ElevenLabs is gone**. Vision Agents' `gemini.Realtime()` plugin ships with `response_modalities=[Modality.AUDIO]` by default, so Gemini Live generates the judge audio natively. No separate TTS plugin, no extra API key, no character quotas to watch. We pick a Gemini prebuilt voice per judge and that is the whole TTS story.
+
+That trims P1's credential handoff from 5 things to 3, plus the COS pieces P1 is still provisioning.
 
 ## 1. Credentials
 
-Paste this into your local `.env`. P1 fills the `<from P1>` placeholders before sharing.
+Paste this into P2's `.env`. The three values from P1 are already filled in. The rest are placeholders P1 or P2 will fill once they exist.
 
 ```bash
-# Tencent TRTC (WebRTC transport for tencent.Edge)
-TRTC_SDK_APP_ID=<from P1>
-TRTC_SECRET_KEY=<from P1>
+# From P1
+TRTC_SDK_APP_ID=70001204
+TRTC_SECRET_KEY=5df6c3ae1016b0abc625c8e3885f08ded2b452f3dff264117209b5907f26a824
+GOOGLE_API_KEY=AIzaSyDHou1lDFXiqNPD35c4S8A-lwEiZTx_sC8
 
-# ElevenLabs (judge voices)
-ELEVENLABS_API_KEY=<from P1>
-ELEVENLABS_VOICE_CUBAN=<from P1>
-ELEVENLABS_VOICE_OLEARY=<from P1>
-ELEVENLABS_VOICE_CORCORAN=<from P1>
-
-# Tencent COS (P1 still uploads session JSON + per-turn audio)
-COS_BUCKET=<from P1>
-COS_REGION=<from P1>
+# P1 still provisioning (COS for session logging)
 TENCENT_SECRET_ID=<from P1>
 TENCENT_SECRET_KEY=<from P1>
+COS_BUCKET=<from P1>
+COS_REGION=ap-guangzhou
 
-# P2 obtains separately
-GOOGLE_API_KEY=<P2 gets from Google AI Studio>
+# P2 obtains
 STREAM_API_KEY=<P2 gets from getstream.io>
 STREAM_API_SECRET=<P2 gets from getstream.io>
 ```
 
-Note: `TRTC_SECRET_KEY` is a different value than `TENCENT_SECRET_KEY`. They come from two separate consoles (`console.trtc.io` vs `console.cloud.tencent.com/cam`). Do not paste one in for the other.
+The TRTC values came from console.trtc.io. The Google key is a Gemini Live capable key from AI Studio. The Tencent CAM values for COS are a separate console from TRTC, that is why they are tracked apart.
 
-## 2. Judge system prompts
+## 2. Gemini voice mapping for the three judges
 
-These are the exact strings from `judges.py`. Preserve the `{mood_desc}` placeholder. P2 substitutes `{mood_desc}` at render time with one of the four descriptors below based on the latest mood float from the Vision Agents mood processor.
+| Judge | Voice name | Personality fit |
+| - | - | - |
+| Cuban | Charon | deep, authoritative |
+| O'Leary | Orus | crisp, sharp |
+| Corcoran | Aoede | warm, female |
 
-### Mood substitution mapping
+The default model is `gemini-2.5-flash-native-audio-preview-12-2025`. It supports all 30 Gemini Live voices, but 8 of those are the stable half-cascade set that ships across model variants: Aoede, Charon, Fenrir, Kore, Leda, Orus, Puck, Zephyr. The picks above all come from that stable set, so swapping models later does not force a re-cast.
 
-| mood range | descriptor |
-| - | - |
-| `mood < 0.3` | `visibly nervous, voice shaky, avoiding eye contact` |
-| `0.3 <= mood < 0.55` | `uncertain but holding together` |
-| `0.55 <= mood < 0.8` | `composed and steady` |
-| `mood >= 0.8` | `confident, maybe overconfident` |
+## 3. Judge system prompts
 
-The canonical mapping lives in `judges._mood_descriptor()`. If P2 wants to reuse it directly, import from there instead of copying the thresholds.
+These are the live strings in `judges.py`. The `{mood_desc}` placeholder gets substituted at runtime based on the live mood score from the vision processor. Preserve the placeholder verbatim if you are templating these into the Gemini config.
 
 ### Cuban
 
@@ -76,110 +73,126 @@ The founder pitching you is currently {mood_desc}. If they are nervous, soften y
 Respond in 2-3 sentences max. Ask one question that gets at who they really are.
 ```
 
-## 3. Judge rotation logic
+### mood_desc substitution rule
 
-Pulled from `judges.pick_next_judge(turn_index, mood)`. Same rules apply on P2's side:
-
-| condition | active judge |
+| mood range | substitution |
 | - | - |
-| `turn_index == 0` | Cuban |
-| `mood < 0.4` | Corcoran (the recovery beat) |
-| else, turn 1, 2, 3, 4, 5, 6... | O'Leary, Corcoran, Cuban, O'Leary, Corcoran, Cuban... |
+| mood < 0.3 | `visibly nervous, voice shaky, avoiding eye contact` |
+| 0.3 <= mood < 0.55 | `uncertain but holding together` |
+| 0.55 <= mood < 0.8 | `composed and steady` |
+| mood >= 0.8 | `confident, maybe overconfident` |
 
-The else branch rotates `[oleary, corcoran, cuban][(turn_index - 1) % 3]`. P2 can either import `pick_next_judge` from `judges.py` or re-implement it. The first option keeps the source of truth in one place.
+P1 ships `judges.render_system_prompt(judge_key, mood)` which does this substitution. P2 can either import it or replicate the table.
 
-## 4. What P1 still owns at runtime
+## 4. Judge rotation logic
 
-P2 does not need to call Tencent COS directly. P1 exposes two functions for session logging that P2 calls after each turn. These live in `cos.py` and are also re-exported through `pipeline.py`.
+From `judges.pick_next_judge(turn_index, mood)`:
+
+- Turn 0 always returns Cuban (he opens)
+- If `mood < 0.4` at any later turn, return Corcoran (recovery beat, warmer)
+- Otherwise rotate `O'Leary -> Corcoran -> Cuban` indexed by `(turn_index - 1) % 3`
+
+P2 can call this directly or reimplement. The rotation keeps Cuban dominant early, Corcoran as the safety valve when the founder cracks, and O'Leary as the cold middle-late challenger.
+
+## 5. Vision Agents wiring
+
+Here is the real init code based on the Vision Agents + Gemini Live plugin shape. Each judge gets its own LLM instance because the voice and system instruction are baked into the `LiveConnectConfigDict` at construction time.
 
 ```python
-from pipeline import log_session, log_turn_audio
+from google.genai.types import (
+    LiveConnectConfigDict, Modality, SpeechConfigDict,
+    VoiceConfigDict, PrebuiltVoiceConfigDict,
+)
+from vision_agents import Agent
+from vision_agents.plugins import gemini, tencent, smart_turn
+import os
 
-# After each turn:
-log_turn_audio(session_id, turn_idx, judge_key, audio_bytes)
+JUDGE_PROMPTS = {...}  # paste from judges_export.json
+JUDGE_VOICES = {"cuban": "Charon", "oleary": "Orus", "corcoran": "Aoede"}
 
-# At session end:
-log_session(session_id, session_data)
+def make_llm_for_judge(judge_key: str) -> gemini.Realtime:
+    return gemini.Realtime(
+        model="gemini-2.5-flash-native-audio-preview-12-2025",
+        config=LiveConnectConfigDict(
+            response_modalities=[Modality.AUDIO],
+            speech_config=SpeechConfigDict(
+                voice_config=VoiceConfigDict(
+                    prebuilt_voice_config=PrebuiltVoiceConfigDict(
+                        voice_name=JUDGE_VOICES[judge_key]
+                    )
+                ),
+                language_code="en-US",
+            ),
+            system_instruction=JUDGE_PROMPTS[judge_key],
+        ),
+        fps=3,
+    )
+
+agent = Agent(
+    edge=tencent.Edge(
+        app_id=int(os.environ["TRTC_SDK_APP_ID"]),
+        secret=os.environ["TRTC_SECRET_KEY"],
+    ),
+    llm=make_llm_for_judge("cuban"),  # initial judge
+    turn_detection=smart_turn.VAD(),
+)
+
+# On judge change: swap agent.llm = make_llm_for_judge(new_judge_key)
+# Or if Vision Agents doesn't support hot-swap, recreate the agent.
 ```
 
-Session JSON schema P2 should build and pass to `log_session`:
+The `system_instruction` already has `{mood_desc}` substituted before being passed in. If you want mood to evolve mid-session inside one judge's turn, you have to rebuild the LLM (the system_instruction is locked at construction). For this demo, swapping per-judge is enough.
+
+## 6. COS session logging (P1 module, P2 calls)
+
+P1 owns `cos.py`. P2 calls it from inside `on_turn_end` or right after the audio buffer is finalized for a turn.
+
+```python
+import cos
+
+url = cos.upload_audio(session_id, turn_idx, judge_key, audio_bytes)
+url = cos.upload_session(session_id, session_data)
+```
+
+Session JSON schema P3's end screen will read:
 
 ```json
 {
   "session_id": "string",
-  "mock_mode": false,
   "turns": [
     {
       "turn_idx": 0,
-      "transcript": "string",
-      "judge": "cuban",
-      "response": "string",
+      "transcript": "string (what the user said)",
+      "judge": "cuban|oleary|corcoran",
+      "response": "string (what the judge said)",
       "mood": 0.62,
-      "latency_ms": 1850
+      "latency_ms": 1840
     }
   ],
-  "total_latency_ms": 12450
+  "total_latency_ms": 14200
 }
 ```
 
-## 5. Vision Agents wiring snippet
+`upload_audio` returns a presigned URL for the per-turn audio blob, useful if P3's end screen wants to replay any individual exchange. `upload_session` writes the full transcript JSON and returns its URL too.
 
-Reference shape only. P2 fills in the actual constructor signatures from the Vision Agents `feat/tencent-rtc` branch.
+## 7. Websocket schema to P3
 
-```python
-from vision_agents import Agent
-from vision_agents.plugins import tencent, gemini, elevenlabs, smart_turn
-import os
-
-JUDGE_PROMPTS = {
-    "cuban": "...paste from section 2...",
-    "oleary": "...paste from section 2...",
-    "corcoran": "...paste from section 2...",
-}
-
-JUDGE_VOICES = {
-    "cuban": os.environ["ELEVENLABS_VOICE_CUBAN"],
-    "oleary": os.environ["ELEVENLABS_VOICE_OLEARY"],
-    "corcoran": os.environ["ELEVENLABS_VOICE_CORCORAN"],
-}
-
-def render_prompt(judge_key: str, mood: float) -> str:
-    return JUDGE_PROMPTS[judge_key].format(mood_desc=_mood_descriptor(mood))
-
-agent = Agent(
-    edge=tencent.Edge(
-        app_id=os.environ["TRTC_SDK_APP_ID"],
-        secret=os.environ["TRTC_SECRET_KEY"],
-    ),
-    llm=gemini.Realtime(
-        fps=3,
-        instructions=render_prompt("cuban", 0.6),
-    ),
-    tts=elevenlabs.TTS(voice_id=JUDGE_VOICES["cuban"]),
-    turn_detection=smart_turn.VAD(),
-)
-
-# When the active judge changes:
-# agent.llm.instructions = render_prompt(next_judge, current_mood)
-# agent.tts.voice_id = JUDGE_VOICES[next_judge]
-```
-
-The websocket emit to P3 after each completed turn:
+The frontend expects messages shaped like:
 
 ```json
-{ "judge": "cuban", "text": "...", "audio": "<blob>" }
+{
+  "judge": "cuban",
+  "text": "What are your unit economics? In one sentence.",
+  "audio": "<base64 PCM or MP3 blob>"
+}
 ```
 
-## 6. Open questions for P2
+`text` is optional (P3 will overlay it as a rolling transcript if present). `audio` is whatever Gemini Live emits, see open question 3 below for format.
 
-1. Does Vision Agents support hot-swapping `instructions` on the `gemini.Realtime` LLM mid-session, or does each judge change require tearing down the agent and spinning up a new one? If the latter, we need to budget a few hundred ms of dead air between judges and either bridge with a placeholder ack or pre-warm the next agent.
-2. Will `smart_turn.VAD()` work cleanly under `tencent.Edge` transport on the `feat/tencent-rtc` branch? Confirm whether that branch has known issues with VAD callbacks or audio framing.
-3. Confirm the websocket schema to P3. Current contract is `{ judge, text, audio }`. Do we want to add `mood`, `turn_idx`, and `session_id` so P3 can pass them back to P1's `log_turn_audio` and `log_session`, or will P2 handle COS logging directly and skip those fields on the wire?
+## 8. Open questions for P2
 
-## 7. Quick verification before the demo
+1. **Hot-swap llm mid-session.** Does `Agent` let us reassign `agent.llm = make_llm_for_judge(new_key)` without dropping the TRTC connection or the turn-detection state? If not, plan B is reconstructing the whole agent per judge change, which costs maybe 1-2 seconds of dead air. Test early.
+2. **smart-turn VAD under tencent.Edge.** The `feat/tencent-rtc` branch is the right place to confirm smart-turn fires reliably with TRTC as the transport. If it does not, fall back to `silero.VAD()` or whatever the Vision Agents default is.
+3. **Gemini audio output format.** Gemini Live native audio is 24kHz PCM. Confirm whether the websocket can ship raw PCM to P3 and have it played in the browser via `AudioBufferSourceNode`, or whether we need to transcode to MP3 server-side first. PCM keeps latency lower but MP3 plays trivially in `<audio>`.
 
-- [ ] Paste `.env` and run any Vision Agents hello-world example to confirm Tencent transport handshakes
-- [ ] Render one Cuban prompt with `mood=0.6`, send to Gemini Realtime, confirm response is 2 to 3 sentences
-- [ ] Run TTS once per voice ID to confirm all three ElevenLabs voices play distinctly
-- [ ] Call `pipeline.log_turn_audio` with a dummy 1-second MP3 to confirm COS upload works end to end
-- [ ] Smoke test judge rotation with `turn_index` 0 to 5 across `mood` values 0.2, 0.5, 0.9
+Anything else surfaces, ping P1 in the team channel.
