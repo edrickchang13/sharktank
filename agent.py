@@ -264,94 +264,119 @@ def build_agent(session: Session) -> Agent:
     _audio_buffer: list[bytes] = []
     _is_speaking = {"value": False}
 
-    @agent.subscribe
-    async def on_user_turn_end(event: RealtimeUserSpeechTranscriptionEvent):
-        if session.paused:
-            return
-        start = time.monotonic()
-        transcript = event.text or ""
+    # vision-agents emits RealtimeUserTranscript / RealtimeAgentTranscript /
+    # RealtimeAudioOutput / RealtimeAudioOutputDone to the LLM's internal
+    # `_output` Stream (consumed by realtime_flow for conversation tracking).
+    # The public PluginBaseEvent variants in core.llm.events are defined but
+    # NEVER emitted, so @agent.subscribe(RealtimeUserSpeechTranscriptionEvent)
+    # silently never fires. Workaround: monkey-patch the LLM's emit methods
+    # so every transcript / audio event also broadcasts to the browser.
+    def _install_emit_patches(llm: Any) -> None:
+        orig_user = llm._emit_user_speech_transcription
+        orig_agent = llm._emit_agent_speech_transcription
+        orig_audio = llm._emit_audio_output_event
+        orig_done = llm._emit_audio_output_done_event
 
-        next_judge = judges.pick_next_judge(session.turn_index, session.mood)
-        latency_ms = int((time.monotonic() - start) * 1000)
-
-        print(
-            f"\n[turn {session.turn_index}] judge={next_judge}  "
-            f"mood={session.mood:.2f}  latency={latency_ms}ms",
-            flush=True,
-        )
-        print(f"  transcript: {transcript!r}", flush=True)
-
-        session.record(transcript, next_judge, latency_ms)
-
-        if next_judge != session.current_judge_key:
-            session.current_judge_key = next_judge
-            agent.llm = make_llm_for_judge(next_judge, session.mood)
-            print(f"  judge swapped -> {next_judge}", flush=True)
-
-        session.turn_index += 1
-
-        await _emit_to_p3({
-            "type": "judge",
-            "judge": next_judge,
-            "mood": round(session.mood, 3),
-            "turn_idx": session.turn_index,
-        })
-
-    @agent.subscribe
-    async def on_audio_chunk(event: RealtimeAudioOutputEvent):
-        if session.paused:
-            return
-        if event.data is not None and event.data.samples is not None:
-            if not _is_speaking["value"]:
-                _is_speaking["value"] = True
-                await _emit_to_p3({
-                    "type": "speaking_start",
-                    "judge": session.current_judge_key,
-                })
-            raw = event.data.samples.tobytes()
-            if raw:
-                _audio_buffer.append(raw)
-
-    @agent.subscribe
-    async def on_audio_done(event: RealtimeAudioOutputDoneEvent):
-        if session.paused:
-            return
-        if event.interrupted or not _audio_buffer:
-            _audio_buffer.clear()
-            _is_speaking["value"] = False
-            # If the founder cut Cuban off mid-sentence, fire a distinct
-            # event so the frontend can flash an "interrupted" badge and
-            # the user sees the judge actually heard them in real time.
-            await _emit_to_p3({
-                "type": "judge_interrupted" if event.interrupted else "speaking_end",
-                "judge": session.current_judge_key,
-            })
-            return
-        audio_bytes = b"".join(_audio_buffer)
-        _audio_buffer.clear()
-        judge_key = session.current_judge_key
-        turn_idx = max(0, session.turn_index - 1)
-        asyncio.create_task(_cos_upload_audio(session.id, turn_idx, judge_key, audio_bytes))
-        _is_speaking["value"] = False
-        await _emit_to_p3({
-            "type": "speaking_end",
-            "judge": judge_key,
-        })
-
-    @agent.subscribe
-    async def on_agent_speech(event: RealtimeAgentSpeechTranscriptionEvent):
-        if session.paused:
-            return
-        if event.mode == "final" and event.text:
-            print(f"  [judge speech] {event.text!r}", flush=True)
-            await _emit_to_p3({
+        def patched_user_emit(text: str, *, mode: str) -> None:
+            orig_user(text, mode=mode)
+            if session.paused or not text or not text.strip():
+                return
+            asyncio.ensure_future(_emit_to_p3({
                 "type": "transcript",
-                "judge": session.current_judge_key,
-                "text": event.text,
+                "judge": "founder",
+                "text": text,
+                "mode": mode,
                 "mood": round(session.mood, 3),
                 "turn_idx": session.turn_index,
-            })
+            }))
 
+        def patched_agent_emit(text: str, *, mode: str) -> None:
+            orig_agent(text, mode=mode)
+            if session.paused or not text or not text.strip():
+                return
+            asyncio.ensure_future(_emit_to_p3({
+                "type": "transcript",
+                "judge": session.current_judge_key,
+                "text": text,
+                "mode": mode,
+                "mood": round(session.mood, 3),
+                "turn_idx": session.turn_index,
+            }))
+
+        def patched_audio_emit(pcm: Any, response_id: Any = None) -> None:
+            orig_audio(pcm, response_id=response_id)
+            if session.paused:
+                return
+            if not _is_speaking["value"]:
+                _is_speaking["value"] = True
+                asyncio.ensure_future(_emit_to_p3({
+                    "type": "speaking_start",
+                    "judge": session.current_judge_key,
+                }))
+            samples = getattr(pcm, "samples", None) if pcm is not None else None
+            if samples is not None:
+                try:
+                    raw = samples.tobytes()
+                    if raw:
+                        _audio_buffer.append(raw)
+                except Exception:
+                    pass
+
+        def patched_done_emit(response_id: Any = None, interrupted: bool = False) -> None:
+            orig_done(response_id=response_id, interrupted=interrupted)
+            was_speaking = _is_speaking["value"]
+            _is_speaking["value"] = False
+            if session.paused:
+                _audio_buffer.clear()
+                return
+
+            asyncio.ensure_future(_emit_to_p3({
+                "type": "judge_interrupted" if interrupted else "speaking_end",
+                "judge": session.current_judge_key,
+            }))
+
+            if not interrupted and _audio_buffer:
+                audio_bytes = b"".join(_audio_buffer)
+                _audio_buffer.clear()
+                turn_idx = max(0, session.turn_index)
+                asyncio.create_task(_cos_upload_audio(
+                    session.id, turn_idx, session.current_judge_key, audio_bytes
+                ))
+            else:
+                _audio_buffer.clear()
+
+            # Rotate to next judge after each completed agent turn so the
+            # founder doesn't get Cuban on every question.
+            if not interrupted and was_speaking:
+                session.turn_index += 1
+                next_judge = judges.pick_next_judge(session.turn_index, session.mood)
+                if next_judge != session.current_judge_key:
+                    print(
+                        f"\n[turn {session.turn_index}] judge swap "
+                        f"{session.current_judge_key} -> {next_judge} "
+                        f"(mood {session.mood:.2f})",
+                        flush=True,
+                    )
+                    session.current_judge_key = next_judge
+                    try:
+                        new_llm = make_llm_for_judge(next_judge, session.mood)
+                        agent.llm = new_llm
+                        _install_emit_patches(new_llm)
+                    except Exception as exc:
+                        print(f"[judge swap failed] {exc}", flush=True)
+                asyncio.ensure_future(_emit_to_p3({
+                    "type": "judge",
+                    "judge": session.current_judge_key,
+                    "mood": round(session.mood, 3),
+                    "turn_idx": session.turn_index,
+                }))
+
+        llm._emit_user_speech_transcription = patched_user_emit
+        llm._emit_agent_speech_transcription = patched_agent_emit
+        llm._emit_audio_output_event = patched_audio_emit
+        llm._emit_audio_output_done_event = patched_done_emit
+
+    _install_emit_patches(agent.llm)
     return agent
 
 
