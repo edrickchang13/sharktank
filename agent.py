@@ -42,8 +42,10 @@ try:
         automatic_activity_detection=AutomaticActivityDetection(
             start_of_speech_sensitivity=StartSensitivity.START_SENSITIVITY_HIGH,
             end_of_speech_sensitivity=EndSensitivity.END_SENSITIVITY_HIGH,
-            silence_duration_ms=300,
-            prefix_padding_ms=50,
+            # 250ms silence + 20ms prefix is the tightest practical combo;
+            # below that risk cutting off the founder mid-pause.
+            silence_duration_ms=250,
+            prefix_padding_ms=20,
         )
     )
 except Exception:
