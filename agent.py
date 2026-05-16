@@ -254,6 +254,7 @@ def build_agent(session: Session) -> Agent:
     )
 
     _audio_buffer: list[bytes] = []
+    _is_speaking = {"value": False}
 
     @agent.subscribe
     async def on_user_turn_end(event: RealtimeUserSpeechTranscriptionEvent):
@@ -289,6 +290,12 @@ def build_agent(session: Session) -> Agent:
     @agent.subscribe
     async def on_audio_chunk(event: RealtimeAudioOutputEvent):
         if event.data is not None and event.data.samples is not None:
+            if not _is_speaking["value"]:
+                _is_speaking["value"] = True
+                await _emit_to_p3({
+                    "type": "speaking_start",
+                    "judge": session.current_judge_key,
+                })
             raw = event.data.samples.tobytes()
             if raw:
                 _audio_buffer.append(raw)
@@ -297,12 +304,22 @@ def build_agent(session: Session) -> Agent:
     async def on_audio_done(event: RealtimeAudioOutputDoneEvent):
         if event.interrupted or not _audio_buffer:
             _audio_buffer.clear()
+            _is_speaking["value"] = False
+            await _emit_to_p3({
+                "type": "speaking_end",
+                "judge": session.current_judge_key,
+            })
             return
         audio_bytes = b"".join(_audio_buffer)
         _audio_buffer.clear()
         judge_key = session.current_judge_key
         turn_idx = max(0, session.turn_index - 1)
         asyncio.create_task(_cos_upload_audio(session.id, turn_idx, judge_key, audio_bytes))
+        _is_speaking["value"] = False
+        await _emit_to_p3({
+            "type": "speaking_end",
+            "judge": judge_key,
+        })
 
     @agent.subscribe
     async def on_agent_speech(event: RealtimeAgentSpeechTranscriptionEvent):
