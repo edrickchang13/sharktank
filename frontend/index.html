@@ -1412,7 +1412,9 @@ function startMoodCapture() {
     moodCanvas.width  = 320;
     moodCanvas.height = 240;
   }
-  moodIntervalId = setInterval(captureMoodFrame, 3000);
+  // 10s cadence keeps mood RPM under Gemini free-tier limits; server-side
+  // rate-limiting in main.py also drops anything faster than 8s.
+  moodIntervalId = setInterval(captureMoodFrame, 10000);
 }
 
 function stopMoodCapture() {

@@ -19,6 +19,7 @@ import base64
 import json
 import os
 import re
+import time
 import uuid
 from typing import Any
 
@@ -74,12 +75,25 @@ async def get_credentials(room_id: int):
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+# gemini-2.5-flash has separate free-tier quota from gemini-2.0-flash.
+# Override via MOOD_MODEL env if you need to swap (e.g. gemini-2.5-flash-lite).
+_MOOD_MODEL = os.environ.get("MOOD_MODEL", "gemini-2.5-flash")
+
+# Server-side rate limit: skip frames arriving faster than this. Cheap defence
+# against accidental client-side flooding and against 429 quota errors.
+_MOOD_MIN_INTERVAL_S = float(os.environ.get("MOOD_MIN_INTERVAL_S", "8.0"))
+_mood_last_call_ts: float = 0.0
+# When the API returns a 429, pause analysis entirely for this long.
+_MOOD_BACKOFF_S = float(os.environ.get("MOOD_BACKOFF_S", "30.0"))
+_mood_backoff_until: float = 0.0
+
+
 def _analyze_frame(jpeg_bytes: bytes) -> tuple[float, str]:
     """Sync Gemini Vision call. Runs in executor; raises on failure."""
     b64 = base64.b64encode(jpeg_bytes).decode()
     client = genai.Client(api_key=os.environ["GOOGLE_API_KEY"])
     resp = client.models.generate_content(
-        model="gemini-2.0-flash",
+        model=_MOOD_MODEL,
         contents=[{
             "parts": [
                 {"inline_data": {"mime_type": "image/jpeg", "data": b64}},
@@ -102,17 +116,36 @@ def _analyze_frame(jpeg_bytes: bytes) -> tuple[float, str]:
 
 
 async def _handle_mood_frame(image_b64: str) -> None:
+    global _mood_last_call_ts, _mood_backoff_until
+
+    now = time.monotonic()
+    if now < _mood_backoff_until:
+        return  # quota-exhausted, silently drop
+    if now - _mood_last_call_ts < _MOOD_MIN_INTERVAL_S:
+        return  # too soon since last analysis
+
     try:
         jpeg = base64.b64decode(image_b64)
     except Exception as e:
         print(f"[ws mood] bad base64: {e}", flush=True)
         return
 
+    _mood_last_call_ts = now
+
     loop = asyncio.get_running_loop()
     try:
         conf, scene = await loop.run_in_executor(None, _analyze_frame, jpeg)
     except Exception as e:
-        print(f"[ws mood] gemini failed: {e}", flush=True)
+        msg = str(e)
+        if "429" in msg or "RESOURCE_EXHAUSTED" in msg:
+            _mood_backoff_until = time.monotonic() + _MOOD_BACKOFF_S
+            print(
+                f"[ws mood] 429 quota hit, pausing analysis for "
+                f"{_MOOD_BACKOFF_S:.0f}s",
+                flush=True,
+            )
+        else:
+            print(f"[ws mood] gemini failed: {msg[:200]}", flush=True)
         return
 
     if _session is not None:
