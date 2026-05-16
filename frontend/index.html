@@ -173,6 +173,88 @@
       color: var(--text-faint);
       padding-left: 6px;
     }
+
+    /* Pause + Exit pill buttons in the header */
+    .header-action {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 14px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid var(--border-soft);
+      color: var(--text-muted);
+      font-family: 'Inter', sans-serif;
+      font-size: 0.66rem;
+      font-weight: 700;
+      letter-spacing: 0.24em;
+      text-transform: uppercase;
+      cursor: pointer;
+      transition:
+        border-color 180ms var(--ease-out),
+        background 180ms var(--ease-out),
+        color 180ms var(--ease-out),
+        transform 180ms var(--ease-out);
+    }
+    .header-action:hover:not(:disabled) {
+      transform: translateY(-1px);
+    }
+    .header-action:active:not(:disabled) {
+      transform: translateY(0);
+    }
+    .header-action:disabled {
+      cursor: not-allowed;
+      opacity: 0.45;
+    }
+    #pause-btn:hover:not(:disabled) {
+      color: var(--gold);
+      border-color: rgba(232, 184, 0, 0.55);
+      background: rgba(232, 184, 0, 0.08);
+      box-shadow: 0 0 14px rgba(232, 184, 0, 0.18);
+    }
+    body.paused #pause-btn {
+      color: var(--gold);
+      border-color: rgba(232, 184, 0, 0.55);
+      background: rgba(232, 184, 0, 0.10);
+    }
+    #exit-btn:hover:not(:disabled) {
+      color: #fecaca;
+      border-color: rgba(239, 68, 68, 0.55);
+      background: rgba(239, 68, 68, 0.10);
+      box-shadow: 0 0 14px rgba(239, 68, 68, 0.18);
+    }
+
+    /* Paused overlay on the YOU panel */
+    .paused-overlay {
+      position: absolute;
+      inset: 0;
+      z-index: 15;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 10px;
+      background: rgba(5, 5, 12, 0.72);
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+      pointer-events: none;
+    }
+    body.paused .paused-overlay { display: flex; }
+    .paused-overlay .paused-badge {
+      font-family: 'Playfair Display', Georgia, serif;
+      font-size: 2.4rem;
+      font-weight: 900;
+      letter-spacing: 0.18em;
+      color: var(--gold);
+      text-shadow: 0 4px 24px rgba(0, 0, 0, 0.7);
+    }
+    .paused-overlay .paused-sub {
+      font-size: 0.66rem;
+      letter-spacing: 0.36em;
+      color: var(--text-muted);
+      font-weight: 700;
+      text-transform: uppercase;
+    }
     .dot {
       width: 8px; height: 8px; border-radius: 50%;
       background: #3a3a44; flex-shrink: 0;
@@ -663,7 +745,8 @@
     /* ─────────────────────────────────────────────────────────────
        Setup overlay
        ───────────────────────────────────────────────────────────── */
-    #setup-screen {
+    #setup-screen,
+    #goodbye-screen {
       position: fixed; inset: 0;
       background:
         radial-gradient(60% 60% at 50% 30%, rgba(232, 184, 0, 0.10), transparent 70%),
@@ -676,6 +759,45 @@
       justify-content: center;
       z-index: 100;
       padding: 24px;
+    }
+    .goodbye-box {
+      background: linear-gradient(180deg, var(--bg-elevated), var(--bg-surface));
+      border: 1px solid var(--border-mid);
+      border-radius: 20px;
+      padding: 48px 44px 44px;
+      max-width: 520px;
+      width: 100%;
+      text-align: center;
+      box-shadow:
+        0 30px 90px rgba(0, 0, 0, 0.6),
+        0 0 0 1px var(--border-soft),
+        inset 0 1px 0 rgba(255, 255, 255, 0.04);
+      position: relative;
+      overflow: hidden;
+    }
+    .goodbye-box::before {
+      content: "";
+      position: absolute;
+      top: -1px; left: 20%; right: 20%;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, var(--gold), transparent);
+      opacity: 0.7;
+    }
+    .goodbye-box h2 {
+      font-family: 'Playfair Display', Georgia, serif;
+      color: var(--text-primary);
+      margin-bottom: 14px;
+      font-size: 2rem;
+      font-weight: 900;
+      letter-spacing: 0.005em;
+      line-height: 1.1;
+    }
+    .goodbye-box .goodbye-msg {
+      color: var(--text-primary);
+      font-size: 0.95rem;
+      line-height: 1.55;
+      font-weight: 500;
+      margin-bottom: 4px;
     }
     #setup-box {
       background: linear-gradient(180deg, var(--bg-elevated), var(--bg-surface));
@@ -862,6 +984,8 @@
     <span class="status-pill"><span class="dot" id="trtc-dot"></span><span id="trtc-label">TRTC</span></span>
     <span class="status-pill"><span class="dot" id="ws-dot"></span><span id="ws-label">WebSocket</span></span>
     <span id="room-info">—</span>
+    <button type="button" class="header-action" id="pause-btn" disabled>Pause</button>
+    <button type="button" class="header-action" id="exit-btn" disabled>Exit</button>
   </div>
 </div>
 
@@ -871,6 +995,10 @@
     <div class="panel-label"><span class="panel-label-dot"></span>You · Founder</div>
     <div class="mic-indicator"><span class="mic-dot"></span>Mic Live</div>
     <div id="local-video"></div>
+    <div class="paused-overlay" aria-hidden="true">
+      <div class="paused-badge">PAUSED</div>
+      <div class="paused-sub">Mic & camera muted</div>
+    </div>
     <div id="confidence-wrapper">
       <div class="confidence-row">
         <span id="confidence-label">Confidence</span>
@@ -899,6 +1027,20 @@
 <!-- Hidden audio sink for TRTC remote stream playback -->
 <div id="remote-audio" style="display:none"></div>
 
+<!-- Goodbye overlay shown after Exit -->
+<div id="goodbye-screen" style="display:none">
+  <div class="goodbye-box">
+    <span class="setup-eyebrow">Session Closed</span>
+    <h2><span class="setup-gold">Thanks</span> for the pitch</h2>
+    <p class="goodbye-msg">Session ended. Refresh to start over.</p>
+    <div class="setup-foot">
+      <span class="foot-dot"></span>
+      <span>Powered by TRTC + Gemini Live</span>
+      <span class="foot-dot"></span>
+    </div>
+  </div>
+</div>
+
 <div id="transcript-panel">
   <div id="transcript-header">
     <span class="transcript-title"><span class="transcript-title-dot"></span>Live Transcript</span>
@@ -925,11 +1067,16 @@ const JUDGE_INFO = {
 // ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
-let trtc        = null;
-let ws          = null;
-let currentJudge = 'cuban';
-let trtcReady   = false;
-let wsReady     = false;
+let trtc          = null;
+let localStream   = null;
+let ws            = null;
+let currentJudge  = 'cuban';
+let trtcReady     = false;
+let wsReady       = false;
+let isPaused      = false;
+let moodIntervalId = null;
+let moodCanvas    = null;
+let sessionEnded  = false;
 
 // ---------------------------------------------------------------------------
 // DOM refs
@@ -949,6 +1096,8 @@ const judgeSubtitle  = document.getElementById('judge-subtitle');
 const confidenceBar  = document.getElementById('confidence');
 const confidencePct  = document.getElementById('confidence-pct');
 const transcriptLog  = document.getElementById('transcript-log');
+const pauseBtn       = document.getElementById('pause-btn');
+const exitBtn        = document.getElementById('exit-btn');
 
 // ---------------------------------------------------------------------------
 // Setup check
@@ -1020,7 +1169,7 @@ async function startSession() {
     // fps=3 for mood. Without this the agent loops its opening line
     // because it never detects a user turn ending.
     setupMsg.textContent = 'Requesting camera + microphone access...';
-    const localStream = TRTC.createStream({
+    localStream = TRTC.createStream({
       audio: true,
       video: true,
       userId,
@@ -1033,6 +1182,13 @@ async function startSession() {
     trtcReady = true;
     setTrtcStatus('green', `TRTC · ${ROOM_ID}`);
     roomInfo.textContent = `Room ${ROOM_ID}`;
+
+    // Enable header controls now that publish succeeded
+    pauseBtn.disabled = false;
+    exitBtn.disabled  = false;
+
+    // Begin periodic mood frame capture from the injected <video>
+    startMoodCapture();
 
     // Hide setup overlay
     setupScreen.style.display = 'none';
@@ -1101,6 +1257,14 @@ function handleMessage(msg) {
       appendTranscript(msg.judge, msg.text);
       setConfidence(msg.mood);
       break;
+
+    case 'mood_update':
+      // Per-frame mood + scene update from the browser-side capture loop
+      setConfidence(msg.mood);
+      if (msg.scene) {
+        console.log('[scene]', msg.scene);
+      }
+      break;
   }
 }
 
@@ -1155,6 +1319,127 @@ function setTrtcStatus(state, label) {
 function setWsStatus(state, label) {
   wsDot.className = `dot ${state}`;
   wsLabel.textContent = label;
+}
+
+// ---------------------------------------------------------------------------
+// Pause / Resume
+// ---------------------------------------------------------------------------
+pauseBtn.addEventListener('click', () => {
+  if (!localStream || sessionEnded) return;
+  isPaused = !isPaused;
+  try {
+    if (isPaused) {
+      localStream.muteAudio();
+      localStream.muteVideo();
+    } else {
+      localStream.unmuteAudio();
+      localStream.unmuteVideo();
+    }
+  } catch (e) {
+    console.warn('Pause toggle error:', e);
+  }
+  document.body.classList.toggle('paused', isPaused);
+  pauseBtn.textContent = isPaused ? 'Resume' : 'Pause';
+});
+
+// ---------------------------------------------------------------------------
+// Exit — tear everything down and show a goodbye overlay
+// ---------------------------------------------------------------------------
+exitBtn.addEventListener('click', async () => {
+  if (sessionEnded) return;
+  sessionEnded = true;
+  pauseBtn.disabled = true;
+  exitBtn.disabled  = true;
+
+  // Stop the mood capture loop first so it doesn't fight cleanup
+  stopMoodCapture();
+
+  // Tear down the local stream
+  if (localStream) {
+    try {
+      if (trtc) {
+        await trtc.unpublish(localStream);
+      }
+    } catch (e) {
+      console.warn('Unpublish error:', e);
+    }
+    try {
+      localStream.stop();
+    } catch (e) {
+      console.warn('localStream.stop error:', e);
+    }
+    localStream = null;
+  }
+
+  // Leave the TRTC room
+  if (trtc) {
+    try {
+      await trtc.leave();
+    } catch (e) {
+      console.warn('TRTC leave error:', e);
+    }
+  }
+
+  // Close the websocket without triggering the reconnect loop
+  if (ws) {
+    try {
+      ws.onclose = null;
+      ws.onerror = null;
+      ws.close();
+    } catch (e) {
+      console.warn('WS close error:', e);
+    }
+    ws = null;
+    wsReady = false;
+  }
+
+  showGoodbyeOverlay();
+});
+
+function showGoodbyeOverlay() {
+  const overlay = document.getElementById('goodbye-screen');
+  if (overlay) overlay.style.display = 'flex';
+}
+
+// ---------------------------------------------------------------------------
+// Mood frame capture — grab the injected <video>, draw to a hidden canvas,
+// and ship a JPEG base64 frame over the websocket every 3 seconds.
+// ---------------------------------------------------------------------------
+function startMoodCapture() {
+  if (moodIntervalId) return;
+  if (!moodCanvas) {
+    moodCanvas = document.createElement('canvas');
+    moodCanvas.width  = 320;
+    moodCanvas.height = 240;
+  }
+  moodIntervalId = setInterval(captureMoodFrame, 3000);
+}
+
+function stopMoodCapture() {
+  if (moodIntervalId) {
+    clearInterval(moodIntervalId);
+    moodIntervalId = null;
+  }
+}
+
+function captureMoodFrame() {
+  if (isPaused || sessionEnded) return;
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+
+  const container = document.getElementById('local-video');
+  if (!container) return;
+  const video = container.querySelector('video');
+  if (!video || video.readyState < 2 || !video.videoWidth) return;
+
+  try {
+    const ctx = moodCanvas.getContext('2d');
+    ctx.drawImage(video, 0, 0, moodCanvas.width, moodCanvas.height);
+    const dataUrl = moodCanvas.toDataURL('image/jpeg', 0.6);
+    const base64  = dataUrl.replace(/^data:image\/jpeg;base64,/, '');
+    ws.send(JSON.stringify({ type: 'mood_frame', image: base64 }));
+  } catch (e) {
+    console.warn('mood_frame capture error:', e);
+  }
 }
 
 // Pre-connect websocket in background even before TRTC join
