@@ -61,7 +61,13 @@ async def index() -> FileResponse:
 
 @app.get("/token")
 async def get_token(room: str, judge_key: str, identity: str | None = None) -> JSONResponse:
-    """Issue a LiveKit JWT for the given room, attaching judge_key as a participant attribute."""
+    """Issue a LiveKit JWT for the room AND dispatch the judge agent to it.
+
+    The worker registers with agent_name='shark-tank-judge' via
+    AgentServer.rtc_session, which means it does NOT auto-accept rooms.
+    We must explicitly create a dispatch when the founder requests a token
+    so the agent worker spawns into the same room.
+    """
     key = os.environ.get("LIVEKIT_API_KEY")
     secret = os.environ.get("LIVEKIT_API_SECRET")
     url = os.environ.get("LIVEKIT_URL")
@@ -82,6 +88,25 @@ async def get_token(room: str, judge_key: str, identity: str | None = None) -> J
     except Exception as e:
         logger.error("token mint failed: %s", e)
         return JSONResponse({"error": str(e)}, status_code=500)
+
+    # Dispatch the judge agent to this room. LiveKit dedupes by (room,
+    # agent_name), so re-issuing a token for the same room is safe.
+    try:
+        lkapi = api.LiveKitAPI(url=url, api_key=key, api_secret=secret)
+        try:
+            await lkapi.agent_dispatch.create_dispatch(
+                api.CreateAgentDispatchRequest(
+                    agent_name="shark-tank-judge",
+                    room=room,
+                    metadata=json.dumps({"judge_key": judge_key}),
+                )
+            )
+            logger.info("agent dispatched room=%s judge=%s", room, judge_key)
+        finally:
+            await lkapi.aclose()
+    except Exception as e:
+        logger.warning("agent dispatch failed for room=%s: %s", room, e)
+
     return JSONResponse({"token": token, "url": url, "ws_url": url, "identity": ident, "room": room})
 
 

@@ -202,11 +202,27 @@ async def entrypoint(ctx: JobContext) -> None:
     session.on("user_speech_committed", lambda e: _record("founder", e))
     session.on("agent_speech_committed", lambda e: _record(userdata.judge_key, e))
 
-    avatar = lemonslice.AvatarSession(
-        agent_image_url=DEFAULT_AVATAR_URLS[judge_key],
-        agent_prompt=AVATAR_PROMPTS[judge_key],
-    )
-    await avatar.start(session, room=ctx.room)
+    # LemonSlice is OPTIONAL. If the API key is not set, run audio-only and
+    # let the browser show the pixel-art placeholder for the active judge.
+    # The frontend reads speaking_start / speaking_end over WS to animate
+    # idle <-> talking even without a real avatar video track.
+    if os.environ.get("LEMONSLICE_API_KEY"):
+        try:
+            avatar = lemonslice.AvatarSession(
+                agent_image_url=DEFAULT_AVATAR_URLS[judge_key],
+                agent_prompt=AVATAR_PROMPTS[judge_key],
+            )
+            await avatar.start(session, room=ctx.room)
+            logger.info("lemonslice avatar started judge=%s", judge_key)
+        except Exception as exc:
+            logger.warning(
+                "lemonslice failed (running audio-only): %s", exc
+            )
+    else:
+        logger.info(
+            "LEMONSLICE_API_KEY not set, running audio-only judge=%s",
+            judge_key,
+        )
 
     async def _upload_on_shutdown() -> None:
         payload = {
