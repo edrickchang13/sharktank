@@ -785,6 +785,7 @@
       <span class="phase-label">Ready</span>
       <span class="seconds">60</span>
     </div>
+    <button type="button" class="header-action" id="skip-pitch-btn" hidden>Skip Pitch</button>
     <button type="button" class="header-action" id="pause-btn" disabled>Pause</button>
     <button type="button" class="header-action" id="share-btn" disabled>Share Screen</button>
     <button type="button" class="header-action" id="exit-btn" disabled>Exit</button>
@@ -919,7 +920,22 @@ let switching = false;
 let rotationCounter = 0;
 let judgeHistory = [];
 let stableIdentity = null;
-const JUDGE_HISTORY_LEN = 2;
+// Near-instant rotation: as soon as the latest mood reading flips the
+// target judge, swap. The speaking lock below still defers the swap until
+// the current judge finishes their sentence, which is what stops them
+// from talking over each other.
+const JUDGE_HISTORY_LEN = 1;
+// No dwell. The user wants the swap to feel instant. The speaking lock
+// is the only courtesy guard left.
+const MIN_JUDGE_DWELL_MS = 0;
+let lastJudgeSwitchTs = 0;
+// True between speaking_start and speaking_end events for the active judge.
+// We never rotate while the judge is mid-sentence; that's where "judges
+// interrupt each other" was coming from.
+let activeJudgeIsSpeaking = false;
+// If we receive a stable rotation target while the judge is still talking,
+// hold it here and rotate as soon as speaking_end fires.
+let deferredRotationTarget = null;
 
 // Transcript accumulator: consecutive deltas from the same speaker append
 // into one line. A line closes on speaker change, ~1.2s silence, final mode,
@@ -972,6 +988,28 @@ const remoteAudioSink = document.getElementById('remote-audio');
 const pitchTimerEl   = document.getElementById('pitch-timer');
 const pitchTimerLabel = pitchTimerEl ? pitchTimerEl.querySelector('.phase-label') : null;
 const pitchTimerSeconds = pitchTimerEl ? pitchTimerEl.querySelector('.seconds') : null;
+const skipPitchBtn   = document.getElementById('skip-pitch-btn');
+
+// Skip Pitch: collapses the opening 60s window so the judge can engage now.
+// Visible only while the timer is in the `pitching` phase. Clicking it
+// finishes the timer (which sends pitch_complete on the LiveKit data
+// channel + WebSocket so the agent stops holding back).
+if (skipPitchBtn) {
+  skipPitchBtn.addEventListener('click', () => {
+    if (pitchPhase !== 'pitching') return;
+    skipPitchBtn.disabled = true;
+    skipPitchBtn.textContent = 'Skipping...';
+    finishPitchTimer();
+    // Hide it after a tick so the user sees the action register.
+    setTimeout(() => {
+      if (skipPitchBtn) {
+        skipPitchBtn.hidden = true;
+        skipPitchBtn.disabled = false;
+        skipPitchBtn.textContent = 'Skip Pitch';
+      }
+    }, 400);
+  });
+}
 
 (function initSetupPanel() {
   const info = JUDGE_INFO[SELECTED_JUDGE];
@@ -1040,8 +1078,13 @@ async function startSession() {
     shareBtn.disabled = false;
 
     // First successful connect: lock in the active judge identity so the
-    // mood-driven rotation has a starting point.
+    // mood-driven rotation has a starting point. Stamp the dwell clock too
+    // so we don't hot-swap a judge that just walked on stage.
     activeJudge = SELECTED_JUDGE;
+    lastJudgeSwitchTs = Date.now();
+    activeJudgeIsSpeaking = false;
+    deferredRotationTarget = null;
+    judgeHistory = [];
 
     // Begin periodic mood frame capture from the injected <video>.
     startMoodCapture();
@@ -1279,11 +1322,18 @@ function handleMessage(msg) {
 
     case 'speaking_start':
       setJudgeTalking(msg.judge, true);
+      if (msg.judge === activeJudge) activeJudgeIsSpeaking = true;
       break;
 
     case 'speaking_end':
       setJudgeTalking(msg.judge, false);
       closeActiveLine();
+      if (msg.judge === activeJudge) {
+        activeJudgeIsSpeaking = false;
+        // If a stable target was deferred while the judge was talking, fire
+        // it now that the utterance is done.
+        flushDeferredRotation();
+      }
       break;
 
     case 'judge_interrupted':
@@ -1387,6 +1437,10 @@ function closeActiveLine() {
 function renderPitchTimer() {
   if (!pitchTimerEl) return;
   pitchTimerEl.dataset.phase = pitchPhase;
+  // Skip Pitch button is only meaningful during the pitching phase.
+  if (skipPitchBtn) {
+    skipPitchBtn.hidden = pitchPhase !== 'pitching';
+  }
   if (pitchPhase === 'idle') {
     if (pitchTimerLabel) pitchTimerLabel.textContent = 'Ready';
     if (pitchTimerSeconds) pitchTimerSeconds.textContent = String(PITCH_TIMER_SECONDS);
@@ -1517,17 +1571,47 @@ function recordTargetJudge(key) {
   }
 }
 
-// Hysteresis gate: only rotate when the last 2 suggestions agree and differ
-// from the judge we're actually connected to. A switch already in flight
-// blocks reentry; pause and session end disable rotation entirely.
+// Hysteresis gate: only rotate when the last N suggestions agree, the
+// active judge has been on stage at least MIN_JUDGE_DWELL_MS, the judge is
+// not currently speaking (mid-utterance swap = "interrupting each other"),
+// and a switch isn't already in flight. Pause and session end disable
+// rotation entirely. If the dwell or speaking guard fails, the target is
+// stored as deferredRotationTarget and the speaking_end handler picks it
+// up once the current judge finishes.
 function maybeRotateJudge() {
   if (switching || sessionEnded) return;
   if (judgeHistory.length < JUDGE_HISTORY_LEN) return;
-  const first = judgeHistory[0];
-  const last  = judgeHistory[judgeHistory.length - 1];
-  if (first !== last) return;
-  if (last === activeJudge) return;
+  const last = judgeHistory[judgeHistory.length - 1];
+  if (!judgeHistory.every((j) => j === last)) return;
+  if (last === activeJudge) {
+    deferredRotationTarget = null;
+    return;
+  }
+  // Dwell guard: stay with the current judge for at least MIN_JUDGE_DWELL_MS
+  // since we last switched (or since session start).
+  const sinceSwitch = Date.now() - (lastJudgeSwitchTs || 0);
+  if (sinceSwitch < MIN_JUDGE_DWELL_MS) {
+    deferredRotationTarget = last;
+    return;
+  }
+  // Speaking guard: never rotate mid-utterance.
+  if (activeJudgeIsSpeaking) {
+    deferredRotationTarget = last;
+    return;
+  }
+  deferredRotationTarget = null;
   switchJudge(last).catch((e) => console.warn('switchJudge unhandled rejection:', e));
+}
+
+// Called from the speaking_end handler so a deferred rotation that was held
+// back during a judge's turn fires the moment they finish talking.
+function flushDeferredRotation() {
+  if (!deferredRotationTarget) return;
+  const target = deferredRotationTarget;
+  deferredRotationTarget = null;
+  maybeRotateJudge.lastTarget = target;
+  // Re-run the gate so dwell time is re-checked at flush time.
+  maybeRotateJudge();
 }
 
 // Tear the current LiveKit room down and rejoin with a fresh room name so
@@ -1558,6 +1642,12 @@ async function switchJudge(newKey) {
   try {
     await rejoinAsJudge(newKey);
     activeJudge = newKey;
+    // Restart the dwell clock so the new judge gets the full MIN_JUDGE_DWELL_MS
+    // window on stage before another rotation can fire.
+    lastJudgeSwitchTs = Date.now();
+    activeJudgeIsSpeaking = false;
+    deferredRotationTarget = null;
+    judgeHistory = [];
     hideSwitchingOverlay(newKey);
     startMoodCapture();
     switching = false;
