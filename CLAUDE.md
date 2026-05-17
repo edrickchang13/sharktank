@@ -1,4 +1,4 @@
-# Shark Tank Simulator: Claude Project Context
+# Pitch Tank: Claude Project Context
 
 This file is loaded automatically when Claude Code runs in this repo. Read it first.
 
@@ -82,7 +82,7 @@ Iteration cap: 8 rounds. If still broken after 8, write a status summary and ask
 
 ## What this project is
 
-Shark Tank pitch simulator for ACM x AIC Hack-A-Stack at SCU, May 16 2026, 6-hour sprint track. User pitches their startup against AI judge avatars modeled on Cuban, O'Leary, and Corcoran. One judge per LiveKit session (picked from the founder's `judge_key` participant attribute). Judge speaks via Gemini Live native audio. Optional LemonSlice avatar provides a talking-head video track.
+Pitch Tank, a Shark Tank-style pitch simulator for ACM x AIC Hack-A-Stack at SCU, May 16 2026, 6-hour sprint track. User pitches their startup against AI judge avatars modeled on Cuban, O'Leary, and Corcoran. One judge per LiveKit session (picked from the founder's `judge_key` participant attribute). Judge speaks via Gemini Live native audio. Optional LemonSlice avatar provides a talking-head video track.
 
 ## Current stack
 

@@ -1,4 +1,4 @@
-"""Shark Tank FastAPI server (LiveKit + LemonSlice stack).
+"""Pitch Tank FastAPI server (LiveKit + LemonSlice stack).
 
 Endpoints: GET / (index), GET /assets/* (static), GET /token (LiveKit JWT),
 WS /ws (broadcast + mood Vision), POST /session_log (forwards to COS).
@@ -29,8 +29,11 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(message)s")
 
-# Captured at import so mood Vision keeps a separate quota bucket from agent Gemini usage.
-_VISION_KEY: str = os.environ.get("GOOGLE_API_KEY", "")
+# Prefer V2 because V1 (GOOGLE_API_KEY) was reported leaked and is now
+# permanently 403'd by Google's reputation system. Mood Vision falls back to
+# V1 only if V2 is unset (which won't work right now, but keeps the
+# expression valid in case the user provisions a fresh V1 later).
+_VISION_KEY: str = os.environ.get("GOOGLE_API_KEY_V2") or os.environ.get("GOOGLE_API_KEY", "")
 
 app = FastAPI()
 app.mount("/assets", StaticFiles(directory="assets"), name="assets")
@@ -110,6 +113,21 @@ async def get_token(room: str, judge_key: str, identity: str | None = None) -> J
     return JSONResponse({"token": token, "url": url, "ws_url": url, "identity": ident, "room": room})
 
 
+@app.post("/broadcast")
+async def broadcast_endpoint(request: Request) -> JSONResponse:
+    """Worker container pushes transcript + speaking events here; web fans
+    them out to every browser via the existing WS broadcast channel.
+    """
+    try:
+        payload = await request.json()
+    except Exception as e:
+        return JSONResponse({"error": f"bad json: {e}"}, status_code=400)
+    if not isinstance(payload, dict):
+        return JSONResponse({"error": "object required"}, status_code=400)
+    await broadcast(payload)
+    return JSONResponse({"ok": True})
+
+
 @app.post("/session_log")
 async def session_log(request: Request) -> JSONResponse:
     """Receive a session log from the agent and upload to COS."""
@@ -137,11 +155,24 @@ _mood_last_call_ts: float = 0.0
 _mood_backoff_until: float = 0.0
 
 
+def _judge_for_mood(mood: float) -> str:
+    """Pick the judge whose energy best matches the founder's current state.
+
+    Nervous founders (mood < 0.4) get Barbara: warm, softens, asks about you.
+    Steady founders (0.4 to 0.7) get Cuban: middle ground, demands numbers.
+    Confident founders (mood > 0.7) get O'Leary: cold press, valuation attack.
+    """
+    if mood < 0.4:
+        return "corcoran"
+    if mood > 0.7:
+        return "oleary"
+    return "cuban"
+
+
 def _analyze_frame(jpeg_bytes: bytes) -> tuple[float, str]:
     """Sync Gemini Vision call. Runs in executor; raises on failure."""
     b64 = base64.b64encode(jpeg_bytes).decode()
-    api_key = _VISION_KEY or os.environ.get("GOOGLE_API_KEY_V2", "")
-    client = genai.Client(api_key=api_key)
+    client = genai.Client(api_key=_VISION_KEY)
     resp = client.models.generate_content(
         model=_MOOD_MODEL,
         contents=[{
@@ -189,7 +220,12 @@ async def _handle_mood_frame(image_b64: str) -> None:
         else:
             logger.warning("[ws mood] gemini failed: %s", msg[:200])
         return
-    await broadcast({"type": "mood_update", "mood": conf, "scene": scene})
+    await broadcast({
+        "type": "mood_update",
+        "mood": conf,
+        "scene": scene,
+        "target_judge": _judge_for_mood(conf),
+    })
 
 
 @app.websocket("/ws")

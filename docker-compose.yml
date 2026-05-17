@@ -1,4 +1,4 @@
-# Two-process Shark Tank: FastAPI web server + LiveKit Agent worker.
+# Two-process Pitch Tank: FastAPI web server + LiveKit Agent worker.
 # Both share the same image (built from Dockerfile) and the same .env file.
 # The worker connects out to LiveKit Cloud (LIVEKIT_URL in .env) and the
 # web server serves the frontend at http://localhost:8000. They live on a

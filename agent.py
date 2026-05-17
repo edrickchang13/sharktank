@@ -1,4 +1,4 @@
-"""Shark Tank judge agent (LiveKit Agents + LemonSlice avatar).
+"""Pitch Tank judge agent (LiveKit Agents + LemonSlice avatar).
 
 One judge per LiveKit session. Persona is locked at session start from the
 participant attribute ``judge_key`` (default ``cuban``). LemonSlice's
@@ -21,6 +21,16 @@ from pathlib import Path
 from typing import Any, Optional
 
 from dotenv import load_dotenv
+
+# Prefer GOOGLE_API_KEY_V2 for the agent's Gemini Live session. The original
+# GOOGLE_API_KEY was reported to Google as leaked (see web logs:
+# "Your API key was reported as leaked, please use another API key") and is
+# now permanently blocked. Set GOOGLE_API_KEY to V2's value BEFORE the
+# google.genai SDK imports so livekit.plugins.google picks up the right key.
+load_dotenv(".env")
+_AGENT_KEY = os.environ.get("GOOGLE_API_KEY_V2") or os.environ.get("GOOGLE_API_KEY", "")
+if _AGENT_KEY:
+    os.environ["GOOGLE_API_KEY"] = _AGENT_KEY
 
 from livekit.agents import (
     Agent,
@@ -78,6 +88,19 @@ AVATAR_PROMPTS: dict[str, str] = {
 
 VALID_JUDGES = tuple(_JUDGES_EXPORT.keys())
 
+# Prepended to every judge's system prompt so the founder gets an
+# uninterrupted 60 second opening. Best-effort: Gemini Live may still
+# interject. The browser is the authoritative timer; the agent observes
+# the protocol via a `pitch_complete` LiveKit data message on expiry.
+PITCH_PREAMBLE = (
+    "Pitch Tank session protocol: the founder gets 60 seconds for an "
+    "uninterrupted opening pitch. During this period, you MUST listen "
+    "silently and not generate any audio response. After they finish "
+    "their opening or 60 seconds elapse, ask your first sharp question. "
+    "If you receive a message that includes 'pitch_complete', the silent "
+    "phase has ended and you may start questioning.\n\n"
+)
+
 
 # ---------------------------------------------------------------------------
 # Session state
@@ -120,7 +143,10 @@ class JudgeAgent(Agent):
         if judge_key not in VALID_JUDGES:
             raise ValueError(f"Unknown judge_key: {judge_key!r}")
         self.judge_key = judge_key
-        instructions = judges.render_system_prompt(judge_key, mood)
+        # Prepend the pitch-phase preamble so the judge stays silent for the
+        # first 60 seconds. The persona body still controls everything else.
+        persona = judges.render_system_prompt(judge_key, mood)
+        instructions = PITCH_PREAMBLE + persona
         # TODO(integration): verify google.beta.realtime.RealtimeModel kwargs.
         # The Live API native-audio model owns STT+LLM+TTS in one socket.
         realtime_llm = google.beta.realtime.RealtimeModel(
@@ -160,6 +186,26 @@ async def entrypoint(ctx: JobContext) -> None:
     """Per-room entry point. One judge per session, picked from attributes."""
     logger.info("entrypoint: connecting to room")
     await ctx.connect()
+
+    # Observe 60s pitch protocol. Browser publishes pitch_complete on the
+    # LiveKit data channel; PITCH_PREAMBLE tells the model to wait for it.
+    # TODO(verify): event name + handler signature on livekit-agents 1.5.x.
+    def _on_data_received(data_packet: Any) -> None:
+        """Log on pitch_complete; ignore other room data."""
+        try:
+            raw = getattr(data_packet, "data", None)
+            if raw is None:
+                return
+            if json.loads(raw.decode()).get("type") == "pitch_complete":
+                logger.info("[pitch_phase] pitch_complete received, judge can engage")
+        except Exception:
+            logger.debug("pitch data parse failed", exc_info=True)
+
+    try:
+        ctx.room.on("data_received", _on_data_received)
+    except Exception as exc:
+        logger.warning("failed to register data_received handler: %s", exc)
+
     participant = await ctx.wait_for_participant()
 
     judge_key = participant.attributes.get("judge_key", "cuban")
@@ -183,8 +229,7 @@ async def entrypoint(ctx: JobContext) -> None:
         resume_false_interruption=False,
     )
 
-    def _record(role: str, event: Any) -> None:
-        text = getattr(event, "transcript", None) or getattr(event, "text", "")
+    def _record_text(role: str, text: str) -> None:
         if not text or not text.strip():
             return
         userdata.transcript_history.append({
@@ -195,12 +240,58 @@ async def entrypoint(ctx: JobContext) -> None:
             "mood": round(userdata.mood, 3),
             "ts": time.time(),
         })
+        speaker = "founder" if role == "founder" else userdata.judge_key
+        asyncio.create_task(_push_to_browser({
+            "type": "transcript",
+            "judge": speaker,
+            "text": text,
+            "mood": round(userdata.mood, 3),
+            "turn_idx": userdata.turn_index,
+            "mode": "final",
+        }))
         if role != "founder":
             userdata.turn_index += 1
 
-    # TODO(integration): verify event names against installed livekit-agents.
-    session.on("user_speech_committed", lambda e: _record("founder", e))
-    session.on("agent_speech_committed", lambda e: _record(userdata.judge_key, e))
+    def _on_user_input_transcribed(event: Any) -> None:
+        if not getattr(event, "is_final", False):
+            return
+        _record_text("founder", str(getattr(event, "transcript", "") or ""))
+
+    def _extract_item_text(item: Any) -> str:
+        for attr in ("text_content", "content", "text"):
+            val = getattr(item, attr, None)
+            if callable(val):
+                try:
+                    val = val()
+                except Exception:
+                    val = None
+            if val is None:
+                continue
+            if isinstance(val, list):
+                parts: list[str] = []
+                for p in val:
+                    if isinstance(p, str):
+                        parts.append(p)
+                    else:
+                        t = getattr(p, "text", None)
+                        if isinstance(t, str):
+                            parts.append(t)
+                return " ".join(parts).strip()
+            if isinstance(val, str):
+                return val.strip()
+        return ""
+
+    def _on_conversation_item_added(event: Any) -> None:
+        item = getattr(event, "item", None)
+        if item is None:
+            return
+        if getattr(item, "role", None) != "assistant":
+            return
+        _record_text(userdata.judge_key, _extract_item_text(item))
+
+    # Event names verified for livekit-agents 1.5.9.
+    session.on("user_input_transcribed", _on_user_input_transcribed)
+    session.on("conversation_item_added", _on_conversation_item_added)
 
     # LemonSlice is OPTIONAL. If the API key is not set, run audio-only and
     # let the browser show the pixel-art placeholder for the active judge.

@@ -1,4 +1,4 @@
-# Shark Tank two-process Docker stack: web (FastAPI) + worker (LiveKit Agent).
+# Pitch Tank two-process Docker stack: web (FastAPI) + worker (LiveKit Agent).
 #
 # NOTE: An older one-off container `sharktank-debug` may still be running
 # and bound to port 8000. If `make up` fails with a port conflict, run

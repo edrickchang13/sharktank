@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Shark Tank Simulator</title>
+  <title>Pitch Tank</title>
   <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.19.0/dist/livekit-client.umd.min.js"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -11,224 +11,203 @@
   <style>
     /* Design tokens */
     :root {
-      --bg-deep:      #0a0a14;
-      --bg-surface:   #15151f;
-      --bg-elevated:  #1c1c28;
-      --bg-glass:     rgba(28, 28, 40, 0.72);
-      --border-soft:  rgba(255, 255, 255, 0.06);
-      --border-mid:   rgba(255, 255, 255, 0.10);
-      --border-strong:rgba(255, 255, 255, 0.18);
-
-      --gold:         #e8b800;
-      --gold-bright:  #ffcf2e;
-      --gold-dim:     rgba(232, 184, 0, 0.18);
-
-      --judge-cuban:    #ef4444;
-      --judge-oleary:   #3b82f6;
-      --judge-corcoran: #a855f7;
-      --founder:        #22c55e;
-
-      --text-primary: #f0f0f0;
-      --text-muted:   #6b7280;
-      --text-faint:   #4a4f5a;
-
-      --radius-sm: 6px;
-      --radius-md: 10px;
-      --radius-lg: 16px;
-
+      --bg-deep: #0a0a14; --bg-surface: #15151f; --bg-elevated: #1c1c28;
+      --bg-glass: rgba(28, 28, 40, 0.72);
+      --border-soft: rgba(255, 255, 255, 0.06);
+      --border-mid: rgba(255, 255, 255, 0.10);
+      --border-strong: rgba(255, 255, 255, 0.18);
+      --gold: #e8b800; --gold-bright: #ffcf2e; --gold-dim: rgba(232, 184, 0, 0.18);
+      --judge-cuban: #ef4444; --judge-oleary: #3b82f6; --judge-corcoran: #a855f7;
+      --founder: #22c55e;
+      --text-primary: #f0f0f0; --text-muted: #6b7280; --text-faint: #4a4f5a;
+      --radius-sm: 6px; --radius-md: 10px; --radius-lg: 16px;
       --shadow-panel: 0 12px 40px rgba(0, 0, 0, 0.55), 0 0 0 1px var(--border-soft);
       --shadow-judge: 0 0 60px rgba(232, 184, 0, 0.12);
-
       --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
     }
-
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
     html, body { height: 100%; }
-
     body {
-      background: var(--bg-deep);
-      color: var(--text-primary);
+      background: var(--bg-deep); color: var(--text-primary);
       font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
       font-feature-settings: 'cv11', 'ss01';
-      -webkit-font-smoothing: antialiased;
-      -moz-osx-font-smoothing: grayscale;
-      height: 100vh;
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-      position: relative;
+      -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
+      height: 100vh; display: flex; flex-direction: column;
+      overflow: hidden; position: relative;
     }
-
     /* Ambient backdrop - subtle radial wash so the dark feels intentional */
     body::before {
-      content: "";
-      position: fixed;
-      inset: 0;
+      content: ""; position: fixed; inset: 0;
       background:
         radial-gradient(60% 50% at 22% 18%, rgba(59, 130, 246, 0.08), transparent 70%),
         radial-gradient(50% 50% at 82% 80%, rgba(232, 184, 0, 0.07), transparent 70%),
         radial-gradient(40% 40% at 50% 50%, rgba(168, 85, 247, 0.04), transparent 70%);
-      pointer-events: none;
-      z-index: 0;
+      pointer-events: none; z-index: 0;
     }
-
     body > * { position: relative; z-index: 1; }
 
     /* Header */
     #header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
+      display: flex; align-items: center; justify-content: space-between;
       padding: 14px 28px;
       background: linear-gradient(180deg, rgba(21, 21, 31, 0.92), rgba(21, 21, 31, 0.78));
-      backdrop-filter: blur(14px);
-      -webkit-backdrop-filter: blur(14px);
+      backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
       border-bottom: 1px solid var(--border-soft);
-      flex-shrink: 0;
-      gap: 24px;
+      flex-shrink: 0; gap: 24px;
     }
-
     #header h1 {
       font-family: 'Playfair Display', Georgia, serif;
-      font-weight: 900;
-      font-size: 1.35rem;
-      letter-spacing: 0.04em;
+      font-weight: 900; font-size: 1.35rem; letter-spacing: 0.04em;
       color: var(--text-primary);
-      display: flex;
-      align-items: center;
-      gap: 14px;
-      white-space: nowrap;
+      display: flex; align-items: center; gap: 14px; white-space: nowrap;
     }
     #header h1 .title-mark {
-      display: inline-block;
-      width: 6px;
-      height: 22px;
-      background: var(--gold);
-      border-radius: 2px;
+      display: inline-block; width: 6px; height: 22px;
+      background: var(--gold); border-radius: 2px;
       box-shadow: 0 0 18px rgba(232, 184, 0, 0.6);
     }
     #header h1 .title-gold {
       color: var(--gold);
       background: linear-gradient(180deg, var(--gold-bright), var(--gold));
-      -webkit-background-clip: text;
-      background-clip: text;
+      -webkit-background-clip: text; background-clip: text;
       -webkit-text-fill-color: transparent;
     }
     #header h1 .title-sub {
       font-family: 'Inter', sans-serif;
-      font-weight: 600;
-      font-size: 0.65rem;
-      letter-spacing: 0.32em;
-      color: var(--text-muted);
-      text-transform: uppercase;
-      padding-left: 14px;
-      border-left: 1px solid var(--border-mid);
-      margin-left: 4px;
+      font-weight: 600; font-size: 0.65rem; letter-spacing: 0.32em;
+      color: var(--text-muted); text-transform: uppercase;
+      padding-left: 14px; border-left: 1px solid var(--border-mid); margin-left: 4px;
     }
-
     #status-bar {
-      display: flex;
-      align-items: center;
-      gap: 18px;
-      font-size: 0.72rem;
-      color: var(--text-muted);
-      font-weight: 500;
-      letter-spacing: 0.06em;
+      display: flex; align-items: center; gap: 18px;
+      font-size: 0.72rem; color: var(--text-muted);
+      font-weight: 500; letter-spacing: 0.06em;
     }
     #status-bar span.status-pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      padding: 6px 12px;
-      border: 1px solid var(--border-soft);
-      border-radius: 999px;
-      background: rgba(255, 255, 255, 0.02);
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 6px 12px; border: 1px solid var(--border-soft);
+      border-radius: 999px; background: rgba(255, 255, 255, 0.02);
       text-transform: uppercase;
       transition: border-color 200ms var(--ease-out), background 200ms var(--ease-out);
     }
     #status-bar span.status-pill:has(.dot.green) {
-      border-color: rgba(34, 197, 94, 0.35);
-      background: rgba(34, 197, 94, 0.06);
-      color: #d4f6dd;
+      border-color: rgba(34, 197, 94, 0.35); background: rgba(34, 197, 94, 0.06); color: #d4f6dd;
     }
     #status-bar span.status-pill:has(.dot.yellow) {
-      border-color: rgba(232, 184, 0, 0.35);
-      background: rgba(232, 184, 0, 0.06);
-      color: #f4e4a3;
+      border-color: rgba(232, 184, 0, 0.35); background: rgba(232, 184, 0, 0.06); color: #f4e4a3;
     }
     #status-bar span.status-pill:has(.dot.red) {
-      border-color: rgba(239, 68, 68, 0.35);
-      background: rgba(239, 68, 68, 0.06);
-      color: #fbcfcf;
+      border-color: rgba(239, 68, 68, 0.35); background: rgba(239, 68, 68, 0.06); color: #fbcfcf;
     }
     #room-info {
       font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
-      font-size: 0.7rem;
-      letter-spacing: 0.08em;
-      color: var(--text-faint);
-      padding-left: 6px;
+      font-size: 0.7rem; letter-spacing: 0.08em;
+      color: var(--text-faint); padding-left: 6px;
     }
-
     /* Pause + Exit pill buttons in the header */
     .header-action {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      padding: 6px 14px;
-      border-radius: 999px;
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 6px 14px; border-radius: 999px;
       background: rgba(255, 255, 255, 0.02);
-      border: 1px solid var(--border-soft);
-      color: var(--text-muted);
+      border: 1px solid var(--border-soft); color: var(--text-muted);
       font-family: 'Inter', sans-serif;
-      font-size: 0.66rem;
-      font-weight: 700;
-      letter-spacing: 0.24em;
-      text-transform: uppercase;
-      cursor: pointer;
+      font-size: 0.66rem; font-weight: 700; letter-spacing: 0.24em;
+      text-transform: uppercase; cursor: pointer;
       transition:
-        border-color 180ms var(--ease-out),
-        background 180ms var(--ease-out),
-        color 180ms var(--ease-out),
-        transform 180ms var(--ease-out);
+        border-color 180ms var(--ease-out), background 180ms var(--ease-out),
+        color 180ms var(--ease-out), transform 180ms var(--ease-out);
     }
-    .header-action:hover:not(:disabled) {
-      transform: translateY(-1px);
-    }
-    .header-action:active:not(:disabled) {
-      transform: translateY(0);
-    }
-    .header-action:disabled {
-      cursor: not-allowed;
-      opacity: 0.45;
-    }
+    .header-action:hover:not(:disabled) { transform: translateY(-1px); }
+    .header-action:active:not(:disabled) { transform: translateY(0); }
+    .header-action:disabled { cursor: not-allowed; opacity: 0.45; }
     #pause-btn:hover:not(:disabled) {
-      color: var(--gold);
-      border-color: rgba(232, 184, 0, 0.55);
+      color: var(--gold); border-color: rgba(232, 184, 0, 0.55);
       background: rgba(232, 184, 0, 0.08);
       box-shadow: 0 0 14px rgba(232, 184, 0, 0.18);
     }
     body.paused #pause-btn {
-      color: var(--gold);
-      border-color: rgba(232, 184, 0, 0.55);
+      color: var(--gold); border-color: rgba(232, 184, 0, 0.55);
       background: rgba(232, 184, 0, 0.10);
     }
     #exit-btn:hover:not(:disabled) {
-      color: #fecaca;
-      border-color: rgba(239, 68, 68, 0.55);
+      color: #fecaca; border-color: rgba(239, 68, 68, 0.55);
       background: rgba(239, 68, 68, 0.10);
       box-shadow: 0 0 14px rgba(239, 68, 68, 0.18);
     }
     #share-btn:hover:not(:disabled) {
-      color: #93c5fd;
-      border-color: rgba(59, 130, 246, 0.55);
+      color: #93c5fd; border-color: rgba(59, 130, 246, 0.55);
       background: rgba(59, 130, 246, 0.10);
       box-shadow: 0 0 14px rgba(59, 130, 246, 0.18);
     }
     body.sharing #share-btn {
-      color: #60a5fa;
-      border-color: rgba(59, 130, 246, 0.55);
+      color: #60a5fa; border-color: rgba(59, 130, 246, 0.55);
       background: rgba(59, 130, 246, 0.10);
+    }
+
+    /* Pitch timer pill: cinematic countdown that lives in the header next to
+       the status pills. Three states (idle, pitching, qa) drive border + glow.
+       The seconds use tabular-nums so the digits do not wobble as they count
+       down. Color shifts gold to amber to red during the last 10 seconds. */
+    #pitch-timer {
+      display: inline-flex; align-items: center; gap: 10px;
+      padding: 6px 14px; border-radius: 999px;
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid var(--border-soft);
+      color: var(--text-muted);
+      font-family: 'Inter', sans-serif;
+      font-size: 0.66rem; font-weight: 700; letter-spacing: 0.24em;
+      text-transform: uppercase;
+      transition:
+        border-color 220ms var(--ease-out), background 220ms var(--ease-out),
+        color 220ms var(--ease-out), box-shadow 220ms var(--ease-out);
+    }
+    #pitch-timer .phase-label {
+      font-size: 0.62rem; font-weight: 800; letter-spacing: 0.3em;
+    }
+    #pitch-timer .seconds {
+      font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+      font-variant-numeric: tabular-nums;
+      font-size: 0.82rem; font-weight: 700; letter-spacing: 0.02em;
+      color: var(--text-primary);
+      min-width: 2.2ch; text-align: right;
+    }
+    #pitch-timer[data-phase="idle"] .seconds { display: none; }
+    #pitch-timer[data-phase="pitching"] {
+      color: var(--gold);
+      border-color: rgba(232, 184, 0, 0.55);
+      background: rgba(232, 184, 0, 0.08);
+      box-shadow: 0 0 16px rgba(232, 184, 0, 0.25);
+    }
+    #pitch-timer[data-phase="pitching"] .seconds {
+      color: var(--gold-bright);
+    }
+    #pitch-timer[data-phase="pitching"][data-warn="amber"] {
+      color: #f59e0b;
+      border-color: rgba(245, 158, 11, 0.6);
+      background: rgba(245, 158, 11, 0.10);
+      box-shadow: 0 0 18px rgba(245, 158, 11, 0.32);
+    }
+    #pitch-timer[data-phase="pitching"][data-warn="amber"] .seconds { color: #fbbf24; }
+    #pitch-timer[data-phase="pitching"][data-warn="red"] {
+      color: #fca5a5;
+      border-color: rgba(239, 68, 68, 0.6);
+      background: rgba(239, 68, 68, 0.10);
+      box-shadow: 0 0 22px rgba(239, 68, 68, 0.4);
+      animation: pitchTimerPulse 1s ease-in-out infinite;
+    }
+    #pitch-timer[data-phase="pitching"][data-warn="red"] .seconds { color: #fecaca; }
+    #pitch-timer[data-phase="qa"] {
+      color: #fecaca;
+      border-color: rgba(239, 110, 50, 0.6);
+      background: rgba(239, 110, 50, 0.10);
+      box-shadow: 0 0 18px rgba(239, 110, 50, 0.32);
+    }
+    #pitch-timer[data-phase="qa"] .seconds {
+      color: #fed7aa; min-width: auto;
+    }
+    @keyframes pitchTimerPulse {
+      0%, 100% { box-shadow: 0 0 22px rgba(239, 68, 68, 0.4); }
+      50%      { box-shadow: 0 0 32px rgba(239, 68, 68, 0.6); }
     }
 
     /* Paused overlay on the YOU panel */
@@ -287,74 +266,42 @@
     }
 
     /* Main split: webcam + judge */
-    #main {
-      display: flex;
-      flex: 1;
-      min-height: 0;
-      gap: 18px;
-      padding: 18px;
-    }
-
+    #main { display: flex; flex: 1; min-height: 0; gap: 18px; padding: 18px; }
     .panel {
-      flex: 1;
-      min-width: 0;
-      display: flex;
-      flex-direction: column;
-      position: relative;
-      background: var(--bg-surface);
-      border-radius: var(--radius-lg);
-      border: 1px solid var(--border-soft);
-      box-shadow: var(--shadow-panel);
+      flex: 1; min-width: 0;
+      display: flex; flex-direction: column; position: relative;
+      background: var(--bg-surface); border-radius: var(--radius-lg);
+      border: 1px solid var(--border-soft); box-shadow: var(--shadow-panel);
       overflow: hidden;
     }
-
     /* Subtle inner sheen so panels feel like real surfaces */
     .panel::before {
-      content: "";
-      position: absolute;
-      inset: 0;
-      pointer-events: none;
+      content: ""; position: absolute; inset: 0; pointer-events: none;
       background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent 30%);
       z-index: 1;
     }
-
     .panel-label {
-      position: absolute;
-      top: 16px; left: 18px;
-      font-size: 0.62rem;
-      font-weight: 700;
-      letter-spacing: 0.32em;
-      color: var(--text-muted);
-      text-transform: uppercase;
-      z-index: 12;
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      padding: 6px 10px;
-      background: rgba(10, 10, 20, 0.55);
-      backdrop-filter: blur(8px);
-      -webkit-backdrop-filter: blur(8px);
-      border: 1px solid var(--border-soft);
-      border-radius: 999px;
+      position: absolute; top: 16px; left: 18px;
+      font-size: 0.62rem; font-weight: 700; letter-spacing: 0.32em;
+      color: var(--text-muted); text-transform: uppercase; z-index: 12;
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 6px 10px; background: rgba(10, 10, 20, 0.55);
+      backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+      border: 1px solid var(--border-soft); border-radius: 999px;
     }
     .panel-label .panel-label-dot {
       width: 6px; height: 6px; border-radius: 50%;
-      background: var(--gold);
-      box-shadow: 0 0 8px rgba(232, 184, 0, 0.7);
+      background: var(--gold); box-shadow: 0 0 8px rgba(232, 184, 0, 0.7);
     }
-
     /* YOU panel: webcam frame */
     #user-side {
       background:
         radial-gradient(80% 60% at 50% 0%, rgba(59, 130, 246, 0.08), transparent 60%),
         var(--bg-surface);
     }
-
     /* Camera frame - placeholder until LiveKit attaches <video> */
     #local-video {
-      position: absolute;
-      inset: 0;
-      width: 100%; height: 100%;
+      position: absolute; inset: 0; width: 100%; height: 100%;
       background:
         repeating-linear-gradient(
           45deg,
@@ -365,123 +312,78 @@
         ),
         radial-gradient(60% 60% at 50% 45%, rgba(59, 130, 246, 0.08), transparent 70%),
         #0d0d18;
-      overflow: hidden;
-      z-index: 0;
+      overflow: hidden; z-index: 0;
     }
-
     /* Placeholder hint shown beneath the video element */
     #local-video::after {
       content: "WAITING FOR CAMERA";
-      position: absolute;
-      inset: 0;
-      display: flex;
-      align-items: center;
-      justify-content: center;
+      position: absolute; inset: 0;
+      display: flex; align-items: center; justify-content: center;
       color: var(--text-faint);
-      font-size: 0.62rem;
-      letter-spacing: 0.4em;
-      font-weight: 600;
+      font-size: 0.62rem; letter-spacing: 0.4em; font-weight: 600;
       z-index: 0;
     }
-
     /* LiveKit attaches a <video> inside this div - make it fill cleanly */
     #local-video video {
-      position: absolute;
-      inset: 0;
-      width: 100%; height: 100%;
-      object-fit: cover;
-      border-radius: 0;
-      z-index: 1;
+      position: absolute; inset: 0; width: 100%; height: 100%;
+      object-fit: cover; border-radius: 0; z-index: 1;
       transform: scaleX(-1); /* mirror like a typical selfie cam */
     }
-
     /* Vignette + soft top-bottom shade for legibility of overlays */
     #user-side::after {
-      content: "";
-      position: absolute;
-      inset: 0;
-      pointer-events: none;
+      content: ""; position: absolute; inset: 0; pointer-events: none;
       background:
         linear-gradient(180deg, rgba(0, 0, 0, 0.45) 0%, transparent 18%, transparent 65%, rgba(0, 0, 0, 0.65) 100%);
       z-index: 2;
     }
-
     /* MIC LIVE indicator pill */
     .mic-indicator {
-      position: absolute;
-      top: 16px; right: 18px;
-      z-index: 12;
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
+      position: absolute; top: 16px; right: 18px; z-index: 12;
+      display: inline-flex; align-items: center; gap: 8px;
       padding: 6px 12px 6px 10px;
       background: rgba(10, 10, 20, 0.55);
-      backdrop-filter: blur(8px);
-      -webkit-backdrop-filter: blur(8px);
-      border: 1px solid rgba(239, 68, 68, 0.35);
-      border-radius: 999px;
+      backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+      border: 1px solid rgba(239, 68, 68, 0.35); border-radius: 999px;
       color: #fecaca;
-      font-size: 0.62rem;
-      font-weight: 700;
-      letter-spacing: 0.24em;
+      font-size: 0.62rem; font-weight: 700; letter-spacing: 0.24em;
       text-transform: uppercase;
     }
     .mic-indicator .mic-dot {
-      width: 8px; height: 8px;
-      border-radius: 50%;
-      background: #ef4444;
-      box-shadow: 0 0 10px rgba(239, 68, 68, 0.7);
+      width: 8px; height: 8px; border-radius: 50%;
+      background: #ef4444; box-shadow: 0 0 10px rgba(239, 68, 68, 0.7);
       animation: micPulse 1.4s ease-in-out infinite;
     }
     @keyframes micPulse {
       0%, 100% { transform: scale(1); opacity: 1; }
       50%      { transform: scale(0.75); opacity: 0.55; }
     }
-
     /* Confidence bar */
     #confidence-wrapper {
-      position: absolute;
-      bottom: 18px; left: 18px; right: 18px;
-      z-index: 12;
-      padding: 14px 16px;
+      position: absolute; bottom: 18px; left: 18px; right: 18px;
+      z-index: 12; padding: 14px 16px;
       background: rgba(10, 10, 20, 0.62);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-      border: 1px solid var(--border-soft);
-      border-radius: var(--radius-md);
+      backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+      border: 1px solid var(--border-soft); border-radius: var(--radius-md);
     }
     .confidence-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
+      display: flex; align-items: center; justify-content: space-between;
       margin-bottom: 8px;
     }
     #confidence-label {
-      font-size: 0.62rem;
-      color: var(--text-muted);
-      letter-spacing: 0.32em;
-      font-weight: 700;
-      text-transform: uppercase;
+      font-size: 0.62rem; color: var(--text-muted); letter-spacing: 0.32em;
+      font-weight: 700; text-transform: uppercase;
     }
     #confidence-label-state {
-      font-size: 0.7rem;
-      font-weight: 600;
-      letter-spacing: 0.08em;
-      color: var(--gold);
-      text-transform: uppercase;
+      font-size: 0.7rem; font-weight: 600; letter-spacing: 0.08em;
+      color: var(--gold); text-transform: uppercase;
     }
     progress#confidence {
-      width: 100%; height: 8px;
-      border-radius: 4px;
-      border: none;
+      width: 100%; height: 8px; border-radius: 4px; border: none;
       background: rgba(0, 0, 0, 0.45);
-      appearance: none;
-      -webkit-appearance: none;
-      display: block;
+      appearance: none; -webkit-appearance: none; display: block;
     }
     progress#confidence::-webkit-progress-bar {
-      background: rgba(0, 0, 0, 0.45);
-      border-radius: 4px;
+      background: rgba(0, 0, 0, 0.45); border-radius: 4px;
     }
     progress#confidence::-webkit-progress-value {
       background: linear-gradient(90deg, #ef4444 0%, #f59e0b 40%, var(--gold) 65%, #22c55e 100%);
@@ -494,34 +396,25 @@
       border-radius: 4px;
     }
     .confidence-meta {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
+      display: flex; align-items: center; justify-content: space-between;
       margin-top: 6px;
     }
     #confidence-pct {
-      font-size: 0.72rem;
-      color: var(--text-primary);
-      font-weight: 600;
+      font-size: 0.72rem; color: var(--text-primary); font-weight: 600;
       font-variant-numeric: tabular-nums;
     }
     .confidence-scale {
-      display: flex;
-      gap: 8px;
-      font-size: 0.58rem;
-      color: var(--text-faint);
-      letter-spacing: 0.14em;
-      text-transform: uppercase;
+      display: flex; gap: 8px;
+      font-size: 0.58rem; color: var(--text-faint);
+      letter-spacing: 0.14em; text-transform: uppercase;
     }
     .confidence-scale span { opacity: 0.7; }
-
     #scene-line {
       margin-top: 8px; font-size: 0.7rem; color: #6b7280; font-style: italic; line-height: 1.4;
       display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
       transition: opacity 280ms var(--ease-out);
     }
     body.paused #scene-line { opacity: 0.3; }
-
     /* JUDGE panel: three-card lineup with active highlighting */
     #judge-panel {
       background:
@@ -530,79 +423,47 @@
         var(--bg-surface);
       padding: 56px 22px 22px;
     }
-
     .judges-row {
-      flex: 1;
-      min-height: 0;
-      display: flex;
-      flex-direction: column;
-      gap: 14px;
-      width: 100%;
-      position: relative;
-      z-index: 2;
+      flex: 1; min-height: 0;
+      display: flex; flex-direction: column; gap: 14px;
+      width: 100%; position: relative; z-index: 2;
     }
-
     .judge-card {
-      flex: 1;
-      min-height: 0;
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-      padding: 12px;
-      border-radius: var(--radius-md);
-      border: 1px solid var(--border-soft);
+      flex: 1; min-height: 0;
+      display: flex; flex-direction: column; gap: 10px; padding: 12px;
+      border-radius: var(--radius-md); border: 1px solid var(--border-soft);
       background:
         linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0.0)),
         rgba(10, 10, 20, 0.45);
-      opacity: 0.45;
-      filter: grayscale(0.4);
-      transform: scale(1);
+      opacity: 0.45; filter: grayscale(0.4); transform: scale(1);
       transition:
-        opacity 320ms var(--ease-out),
-        filter 320ms var(--ease-out),
-        transform 320ms var(--ease-out),
-        border-color 320ms var(--ease-out),
-        box-shadow 320ms var(--ease-out),
-        background 320ms var(--ease-out);
+        opacity 320ms var(--ease-out), filter 320ms var(--ease-out),
+        transform 320ms var(--ease-out), border-color 320ms var(--ease-out),
+        box-shadow 320ms var(--ease-out), background 320ms var(--ease-out);
     }
-
     .judge-card.active {
-      opacity: 1;
-      filter: grayscale(0);
-      transform: scale(1.02);
+      opacity: 1; filter: grayscale(0); transform: scale(1.02);
       border-color: rgba(232, 184, 0, 0.45);
       box-shadow: 0 0 24px rgba(232, 184, 0, 0.35);
       background:
         linear-gradient(180deg, rgba(232, 184, 0, 0.06), rgba(255, 255, 255, 0.0)),
         rgba(14, 14, 24, 0.55);
     }
-
     .judge-card.active[data-judge="cuban"]    { border-color: var(--judge-cuban); }
     .judge-card.active[data-judge="oleary"]   { border-color: var(--judge-oleary); }
     .judge-card.active[data-judge="corcoran"] { border-color: var(--judge-corcoran); }
-
-    .judge-card.speaking {
-      animation: judgeCardPulse 1.8s ease-in-out infinite;
-    }
+    .judge-card.speaking { animation: judgeCardPulse 1.8s ease-in-out infinite; }
     @keyframes judgeCardPulse {
       0%, 100% { box-shadow: 0 0 22px rgba(232, 184, 0, 0.30); }
       50%      { box-shadow: 0 0 38px rgba(232, 184, 0, 0.55); }
     }
-
     .judge-card-frame {
-      position: relative;
-      flex: 1;
-      min-height: 0;
-      border-radius: var(--radius-sm);
-      overflow: hidden;
+      position: relative; flex: 1; min-height: 0;
+      border-radius: var(--radius-sm); overflow: hidden;
       background: rgba(0, 0, 0, 0.35);
     }
-
     .judge-card-img {
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-      display: block;
+      width: 100%; height: 100%; object-fit: cover; display: block;
       image-rendering: pixelated;
     }
 
@@ -610,187 +471,119 @@
        slots into the active judge card without shifting any layout. Hidden
        by default; the JS reveals it when a remote video track is attached. */
     .judge-video {
-      position: absolute;
-      inset: 0;
-      width: 100%;
-      height: 100%;
-      object-fit: contain;
-      display: block;
-      z-index: 2;
-      background: transparent;
-      opacity: 0;
-      transition: opacity 280ms var(--ease-out);
-      pointer-events: none;
+      position: absolute; inset: 0; width: 100%; height: 100%;
+      object-fit: contain; display: block; z-index: 2;
+      background: transparent; opacity: 0;
+      transition: opacity 280ms var(--ease-out); pointer-events: none;
     }
-    .judge-video.has-stream {
-      opacity: 1;
-      background: #000;
-    }
-
+    .judge-video.has-stream { opacity: 1; background: #000; }
     /* Transient status overlay used for INTERRUPTED / INCOMING labels. */
     .judge-card-overlay {
-      position: absolute;
-      inset: 0;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      pointer-events: none;
-      z-index: 4;
-      font-size: 0.72rem;
-      font-weight: 800;
-      letter-spacing: 0.32em;
-      color: var(--gold);
-      text-transform: uppercase;
-      opacity: 0;
-      transition: opacity 220ms var(--ease-out);
+      position: absolute; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      pointer-events: none; z-index: 4;
+      font-size: 0.72rem; font-weight: 800; letter-spacing: 0.32em;
+      color: var(--gold); text-transform: uppercase;
+      opacity: 0; transition: opacity 220ms var(--ease-out);
       background: rgba(5, 5, 12, 0.55);
-      backdrop-filter: blur(3px);
-      -webkit-backdrop-filter: blur(3px);
+      backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
       text-shadow: 0 2px 14px rgba(0, 0, 0, 0.7);
     }
     .judge-card-overlay.interrupted { opacity: 1; }
-
+    .judge-card-overlay.switching { opacity: 1; }
+    /* Toast shown under the confidence card on switch failures. */
+    .switch-toast {
+      position: absolute; left: 18px; right: 18px; bottom: 18px; z-index: 18;
+      padding: 10px 14px;
+      background: rgba(120, 20, 20, 0.78);
+      border: 1px solid rgba(239, 68, 68, 0.55);
+      border-radius: var(--radius-md);
+      color: #fecaca;
+      font-size: 0.72rem; font-weight: 600; letter-spacing: 0.04em;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+      transform: translateY(8px); opacity: 0; pointer-events: none;
+      transition: opacity 260ms var(--ease-out), transform 260ms var(--ease-out);
+    }
+    .switch-toast.visible { opacity: 1; transform: translateY(0); pointer-events: auto; }
     .judge-card-onair,
     .judge-card-thinking {
-      position: absolute;
-      top: 8px; right: 8px;
-      display: none;
-      align-items: center;
-      gap: 6px;
-      padding: 4px 9px;
-      border-radius: 999px;
-      font-size: 0.55rem;
-      font-weight: 700;
-      letter-spacing: 0.24em;
+      position: absolute; top: 8px; right: 8px;
+      display: none; align-items: center; gap: 6px;
+      padding: 4px 9px; border-radius: 999px;
+      font-size: 0.55rem; font-weight: 700; letter-spacing: 0.24em;
       text-transform: uppercase;
       background: rgba(10, 10, 20, 0.7);
-      backdrop-filter: blur(6px);
-      -webkit-backdrop-filter: blur(6px);
+      backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
       z-index: 3;
     }
-    .judge-card-onair {
-      color: var(--gold);
-      border: 1px solid rgba(232, 184, 0, 0.55);
-    }
+    .judge-card-onair { color: var(--gold); border: 1px solid rgba(232, 184, 0, 0.55); }
     .judge-card-onair::before {
-      content: "";
-      width: 6px; height: 6px;
-      border-radius: 50%;
-      background: var(--gold);
-      box-shadow: 0 0 8px var(--gold);
+      content: ""; width: 6px; height: 6px; border-radius: 50%;
+      background: var(--gold); box-shadow: 0 0 8px var(--gold);
       animation: micPulse 1.8s ease-in-out infinite;
     }
-    .judge-card-thinking {
-      color: #c7d2fe;
-      border: 1px solid rgba(165, 180, 252, 0.4);
-    }
-
+    .judge-card-thinking { color: #c7d2fe; border: 1px solid rgba(165, 180, 252, 0.4); }
     .judge-card.active .judge-card-onair { display: inline-flex; }
     .judge-card.speaking:not(.active) .judge-card-thinking { display: inline-flex; }
-
     .judge-card-meta {
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-      padding: 0 2px;
+      display: flex; flex-direction: column; gap: 2px; padding: 0 2px;
     }
     .judge-card-name {
       font-family: 'Playfair Display', Georgia, serif;
-      font-size: 0.95rem;
-      font-weight: 700;
+      font-size: 0.95rem; font-weight: 700;
       color: var(--text-primary);
-      letter-spacing: 0.005em;
-      line-height: 1.15;
+      letter-spacing: 0.005em; line-height: 1.15;
     }
-    .judge-card.active .judge-card-name {
-      color: var(--gold);
-    }
+    .judge-card.active .judge-card-name { color: var(--gold); }
     .judge-card-subtitle {
-      font-size: 0.58rem;
-      color: var(--text-muted);
-      letter-spacing: 0.24em;
-      text-transform: uppercase;
-      font-weight: 600;
+      font-size: 0.58rem; color: var(--text-muted);
+      letter-spacing: 0.24em; text-transform: uppercase; font-weight: 600;
     }
-
     @media (min-width: 1200px) {
-      .judges-row {
-        flex-direction: row;
-        align-items: stretch;
-      }
-      .judge-card {
-        flex: 1 1 0;
-      }
+      .judges-row { flex-direction: row; align-items: stretch; }
+      .judge-card { flex: 1 1 0; }
     }
-
     /* Transcript panel */
     #transcript-panel {
-      flex-shrink: 0;
-      height: 200px;
-      margin: 0 18px 18px;
+      flex-shrink: 0; height: 200px; margin: 0 18px 18px;
       background: linear-gradient(180deg, var(--bg-surface), #10101a);
-      border: 1px solid var(--border-soft);
-      border-radius: var(--radius-lg);
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-      box-shadow: var(--shadow-panel);
+      border: 1px solid var(--border-soft); border-radius: var(--radius-lg);
+      display: flex; flex-direction: column;
+      overflow: hidden; box-shadow: var(--shadow-panel);
     }
     #transcript-header {
       padding: 12px 22px;
-      font-size: 0.62rem;
-      font-weight: 700;
-      letter-spacing: 0.32em;
-      color: var(--text-muted);
-      text-transform: uppercase;
+      font-size: 0.62rem; font-weight: 700; letter-spacing: 0.32em;
+      color: var(--text-muted); text-transform: uppercase;
       border-bottom: 1px solid var(--border-soft);
       flex-shrink: 0;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
+      display: flex; align-items: center; justify-content: space-between;
       background: rgba(0, 0, 0, 0.18);
     }
-    #transcript-header .transcript-title {
-      display: inline-flex;
-      align-items: center;
-      gap: 10px;
-    }
+    #transcript-header .transcript-title { display: inline-flex; align-items: center; gap: 10px; }
     #transcript-header .transcript-title-dot {
-      width: 6px; height: 6px;
-      border-radius: 50%;
-      background: var(--gold);
-      box-shadow: 0 0 8px rgba(232, 184, 0, 0.6);
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--gold); box-shadow: 0 0 8px rgba(232, 184, 0, 0.6);
     }
     #transcript-header .transcript-hint {
-      font-size: 0.58rem;
-      color: var(--text-faint);
-      letter-spacing: 0.24em;
+      font-size: 0.58rem; color: var(--text-faint); letter-spacing: 0.24em;
     }
     #transcript-log {
-      flex: 1;
-      overflow-y: auto;
+      flex: 1; overflow-y: auto;
       padding: 14px 24px 18px;
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
+      display: flex; flex-direction: column; gap: 10px;
       scroll-behavior: smooth;
     }
     #transcript-log::-webkit-scrollbar { width: 6px; }
     #transcript-log::-webkit-scrollbar-track { background: transparent; }
     #transcript-log::-webkit-scrollbar-thumb {
-      background: rgba(255, 255, 255, 0.08);
-      border-radius: 3px;
+      background: rgba(255, 255, 255, 0.08); border-radius: 3px;
     }
     #transcript-log::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.14); }
-
     .tx-line {
-      font-size: 0.88rem;
-      line-height: 1.5;
-      display: flex;
-      gap: 14px;
-      align-items: flex-start;
-      padding: 8px 12px;
-      border-radius: var(--radius-sm);
+      font-size: 0.88rem; line-height: 1.5;
+      display: flex; gap: 14px; align-items: flex-start;
+      padding: 8px 12px; border-radius: var(--radius-sm);
       background: rgba(255, 255, 255, 0.015);
       border: 1px solid var(--border-soft);
       animation: lineFadeIn 360ms var(--ease-out);
@@ -800,37 +593,20 @@
       to   { opacity: 1; transform: translateY(0);   }
     }
     .tx-speaker {
-      flex-shrink: 0;
-      font-weight: 700;
-      min-width: 130px;
-      font-size: 0.76rem;
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
-      padding-top: 1px;
-      position: relative;
-      padding-left: 12px;
+      flex-shrink: 0; font-weight: 700; min-width: 130px;
+      font-size: 0.76rem; letter-spacing: 0.04em; text-transform: uppercase;
+      padding-top: 1px; position: relative; padding-left: 12px;
     }
     .tx-speaker::before {
-      content: "";
-      position: absolute;
-      left: 0;
-      top: 4px;
-      bottom: 4px;
-      width: 3px;
-      border-radius: 2px;
-      background: currentColor;
-      opacity: 0.85;
+      content: ""; position: absolute;
+      left: 0; top: 4px; bottom: 4px; width: 3px; border-radius: 2px;
+      background: currentColor; opacity: 0.85;
     }
     .tx-speaker.judge-cuban    { color: var(--judge-cuban);    }
     .tx-speaker.judge-oleary   { color: var(--judge-oleary);   }
     .tx-speaker.judge-corcoran { color: var(--judge-corcoran); }
     .tx-speaker.founder        { color: var(--founder);        }
-    .tx-text {
-      color: var(--text-primary);
-      font-weight: 400;
-      letter-spacing: 0.005em;
-    }
-
+    .tx-text { color: var(--text-primary); font-weight: 400; letter-spacing: 0.005em; }
     /* Setup overlay */
     #setup-screen,
     #goodbye-screen {
@@ -839,175 +615,93 @@
         radial-gradient(60% 60% at 50% 30%, rgba(232, 184, 0, 0.10), transparent 70%),
         radial-gradient(50% 50% at 50% 100%, rgba(59, 130, 246, 0.08), transparent 70%),
         rgba(5, 5, 12, 0.96);
-      backdrop-filter: blur(8px);
-      -webkit-backdrop-filter: blur(8px);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      z-index: 100;
-      padding: 24px;
+      backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 100; padding: 24px;
     }
-    .goodbye-box {
-      background: linear-gradient(180deg, var(--bg-elevated), var(--bg-surface));
-      border: 1px solid var(--border-mid);
-      border-radius: 20px;
-      padding: 48px 44px 44px;
-      max-width: 520px;
-      width: 100%;
-      text-align: center;
-      box-shadow:
-        0 30px 90px rgba(0, 0, 0, 0.6),
-        0 0 0 1px var(--border-soft),
-        inset 0 1px 0 rgba(255, 255, 255, 0.04);
-      position: relative;
-      overflow: hidden;
-    }
-    .goodbye-box::before {
-      content: "";
-      position: absolute;
-      top: -1px; left: 20%; right: 20%;
-      height: 1px;
-      background: linear-gradient(90deg, transparent, var(--gold), transparent);
-      opacity: 0.7;
-    }
-    .goodbye-box h2 {
-      font-family: 'Playfair Display', Georgia, serif;
-      color: var(--text-primary);
-      margin-bottom: 14px;
-      font-size: 2rem;
-      font-weight: 900;
-      letter-spacing: 0.005em;
-      line-height: 1.1;
-    }
-    .goodbye-box .goodbye-msg {
-      color: var(--text-primary);
-      font-size: 0.95rem;
-      line-height: 1.55;
-      font-weight: 500;
-      margin-bottom: 4px;
-    }
+    .goodbye-box,
     #setup-box {
       background: linear-gradient(180deg, var(--bg-elevated), var(--bg-surface));
-      border: 1px solid var(--border-mid);
-      border-radius: 20px;
+      border: 1px solid var(--border-mid); border-radius: 20px;
       padding: 48px 44px 44px;
-      max-width: 520px;
-      width: 100%;
-      text-align: center;
+      max-width: 520px; width: 100%; text-align: center;
       box-shadow:
         0 30px 90px rgba(0, 0, 0, 0.6),
         0 0 0 1px var(--border-soft),
         inset 0 1px 0 rgba(255, 255, 255, 0.04);
-      position: relative;
-      overflow: hidden;
+      position: relative; overflow: hidden;
     }
+    .goodbye-box::before,
     #setup-box::before {
-      content: "";
-      position: absolute;
-      top: -1px; left: 20%; right: 20%;
-      height: 1px;
+      content: ""; position: absolute;
+      top: -1px; left: 20%; right: 20%; height: 1px;
       background: linear-gradient(90deg, transparent, var(--gold), transparent);
       opacity: 0.7;
+    }
+    .goodbye-box h2,
+    #setup-box h2 {
+      font-family: 'Playfair Display', Georgia, serif;
+      color: var(--text-primary); margin-bottom: 14px;
+      font-size: 2rem; font-weight: 900;
+      letter-spacing: 0.005em; line-height: 1.1;
+    }
+    .goodbye-box .goodbye-msg {
+      color: var(--text-primary); font-size: 0.95rem; line-height: 1.55;
+      font-weight: 500; margin-bottom: 4px;
     }
     .setup-eyebrow {
       display: inline-block;
-      font-size: 0.62rem;
-      font-weight: 700;
-      letter-spacing: 0.4em;
-      color: var(--gold);
-      text-transform: uppercase;
-      margin-bottom: 14px;
-      padding: 5px 14px;
-      border: 1px solid var(--gold-dim);
-      border-radius: 999px;
+      font-size: 0.62rem; font-weight: 700; letter-spacing: 0.4em;
+      color: var(--gold); text-transform: uppercase;
+      margin-bottom: 14px; padding: 5px 14px;
+      border: 1px solid var(--gold-dim); border-radius: 999px;
       background: rgba(232, 184, 0, 0.06);
-    }
-    #setup-box h2 {
-      font-family: 'Playfair Display', Georgia, serif;
-      color: var(--text-primary);
-      margin-bottom: 14px;
-      font-size: 2rem;
-      font-weight: 900;
-      letter-spacing: 0.005em;
-      line-height: 1.1;
     }
     #setup-box h2 .setup-gold {
       background: linear-gradient(180deg, var(--gold-bright), var(--gold));
-      -webkit-background-clip: text;
-      background-clip: text;
+      -webkit-background-clip: text; background-clip: text;
       -webkit-text-fill-color: transparent;
     }
     #setup-box p#setup-msg {
-      color: var(--text-primary);
-      font-size: 0.95rem;
-      margin-bottom: 8px;
-      line-height: 1.55;
-      font-weight: 500;
+      color: var(--text-primary); font-size: 0.95rem;
+      margin-bottom: 8px; line-height: 1.55; font-weight: 500;
     }
     .setup-helper {
-      color: var(--text-muted);
-      font-size: 0.78rem;
-      margin-bottom: 22px;
-      line-height: 1.55;
+      color: var(--text-muted); font-size: 0.78rem;
+      margin-bottom: 22px; line-height: 1.55;
     }
     .setup-judge-line {
-      display: inline-flex;
-      align-items: center;
-      gap: 10px;
-      font-size: 0.7rem;
-      font-weight: 600;
-      letter-spacing: 0.18em;
-      color: var(--text-muted);
-      text-transform: uppercase;
-      margin-bottom: 22px;
-      padding: 8px 16px;
-      border: 1px solid var(--border-soft);
-      border-radius: 999px;
+      display: inline-flex; align-items: center; gap: 10px;
+      font-size: 0.7rem; font-weight: 600; letter-spacing: 0.18em;
+      color: var(--text-muted); text-transform: uppercase;
+      margin-bottom: 22px; padding: 8px 16px;
+      border: 1px solid var(--border-soft); border-radius: 999px;
       background: rgba(255, 255, 255, 0.02);
     }
     .setup-judge-line .setup-judge-name {
-      color: var(--gold);
-      font-weight: 700;
-      letter-spacing: 0.06em;
-      text-transform: none;
+      color: var(--gold); font-weight: 700;
+      letter-spacing: 0.06em; text-transform: none;
     }
     #setup-error  {
-      color: #fca5a5;
-      font-size: 0.82rem;
-      margin-top: 16px;
-      min-height: 22px;
-      font-weight: 500;
+      color: #fca5a5; font-size: 0.82rem;
+      margin-top: 16px; min-height: 22px; font-weight: 500;
     }
-
     .btn {
       background: linear-gradient(180deg, var(--gold-bright), var(--gold));
-      color: #1a1300;
-      border: none;
-      border-radius: 12px;
+      color: #1a1300; border: none; border-radius: 12px;
       padding: 18px 36px;
-      font-size: 1rem;
-      font-weight: 700;
-      letter-spacing: 0.04em;
+      font-size: 1rem; font-weight: 700; letter-spacing: 0.04em;
       cursor: pointer;
       transition: transform 200ms var(--ease-out), box-shadow 200ms var(--ease-out), filter 200ms var(--ease-out);
       box-shadow:
         0 10px 30px rgba(232, 184, 0, 0.25),
         inset 0 1px 0 rgba(255, 255, 255, 0.4);
-      width: 100%;
-      font-family: 'Inter', sans-serif;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 10px;
+      width: 100%; font-family: 'Inter', sans-serif;
+      display: inline-flex; align-items: center; justify-content: center; gap: 10px;
     }
-    .btn::after {
-      content: "→";
-      font-size: 1.1rem;
-      transition: transform 200ms var(--ease-out);
-    }
+    .btn::after { content: "→"; font-size: 1.1rem; transition: transform 200ms var(--ease-out); }
     .btn:hover:not(:disabled) {
-      transform: translateY(-1px);
-      filter: brightness(1.05);
+      transform: translateY(-1px); filter: brightness(1.05);
       box-shadow:
         0 14px 36px rgba(232, 184, 0, 0.35),
         inset 0 1px 0 rgba(255, 255, 255, 0.45);
@@ -1015,27 +709,17 @@
     .btn:hover:not(:disabled)::after { transform: translateX(3px); }
     .btn:active:not(:disabled) { transform: translateY(0); }
     .btn:disabled {
-      background: #2a2a36;
-      color: var(--text-faint);
-      cursor: not-allowed;
-      box-shadow: none;
+      background: #2a2a36; color: var(--text-faint);
+      cursor: not-allowed; box-shadow: none;
     }
     .btn:disabled::after { content: ""; }
-
     .setup-foot {
       margin-top: 22px;
-      font-size: 0.72rem;
-      color: var(--text-faint);
-      letter-spacing: 0.04em;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 10px;
+      font-size: 0.72rem; color: var(--text-faint); letter-spacing: 0.04em;
+      display: flex; align-items: center; justify-content: center; gap: 10px;
     }
     .setup-foot .foot-dot {
-      width: 5px; height: 5px;
-      border-radius: 50%;
-      background: var(--text-faint);
+      width: 5px; height: 5px; border-radius: 50%; background: var(--text-faint);
     }
 
     /* Responsive degradation */
@@ -1068,7 +752,7 @@
 <div id="setup-screen">
   <div id="setup-box">
     <span class="setup-eyebrow">Live Pitch Session</span>
-    <h2><span class="setup-gold">Shark Tank</span> Simulator</h2>
+    <h2><span class="setup-gold">Pitch</span> Tank</h2>
     <p id="setup-msg">Connecting to the pitch room...</p>
     <p class="setup-helper">Browser will ask for camera and microphone access.</p>
     <div class="setup-judge-line">
@@ -1089,14 +773,18 @@
 <div id="header">
   <h1>
     <span class="title-mark"></span>
-    <span class="title-gold">SHARK TANK</span>
-    <span>SIMULATOR</span>
+    <span class="title-gold">PITCH</span>
+    <span>TANK</span>
     <span class="title-sub">Pitch Room</span>
   </h1>
   <div id="status-bar">
     <span class="status-pill"><span class="dot" id="rtc-dot"></span><span id="rtc-label">LIVEKIT</span></span>
     <span class="status-pill"><span class="dot" id="ws-dot"></span><span id="ws-label">WebSocket</span></span>
     <span id="room-info">--</span>
+    <div id="pitch-timer" data-phase="idle" role="timer" aria-live="polite">
+      <span class="phase-label">Ready</span>
+      <span class="seconds">60</span>
+    </div>
     <button type="button" class="header-action" id="pause-btn" disabled>Pause</button>
     <button type="button" class="header-action" id="share-btn" disabled>Share Screen</button>
     <button type="button" class="header-action" id="exit-btn" disabled>Exit</button>
@@ -1126,6 +814,7 @@
         <div id="confidence-pct">50%</div>
       </div>
       <div id="scene-line">--</div>
+      <div class="switch-toast" id="switch-toast" aria-hidden="true"></div>
     </div>
   </div>
 
@@ -1139,7 +828,7 @@
           <video class="judge-video" id="judge-video" autoplay playsinline></video>
           <div class="judge-card-onair">On Air</div>
           <div class="judge-card-thinking">Thinking</div>
-          <div class="judge-card-overlay" id="judge-status-overlay"></div>
+          <div class="judge-card-overlay" id="judge-status-overlay-cuban"></div>
         </div>
         <div class="judge-card-meta">
           <div class="judge-card-name">Mark Cuban</div>
@@ -1151,6 +840,7 @@
           <img class="judge-card-img" src="/assets/judges/oleary.png" alt="Kevin O'Leary">
           <div class="judge-card-onair">On Air</div>
           <div class="judge-card-thinking">Thinking</div>
+          <div class="judge-card-overlay" id="judge-status-overlay-oleary"></div>
         </div>
         <div class="judge-card-meta">
           <div class="judge-card-name">Kevin O'Leary</div>
@@ -1162,6 +852,7 @@
           <img class="judge-card-img" src="/assets/judges/corcoran.png" alt="Barbara Corcoran">
           <div class="judge-card-onair">On Air</div>
           <div class="judge-card-thinking">Thinking</div>
+          <div class="judge-card-overlay" id="judge-status-overlay-corcoran"></div>
         </div>
         <div class="judge-card-meta">
           <div class="judge-card-name">Barbara Corcoran</div>
@@ -1219,11 +910,40 @@ let isPaused = false, sessionEnded = false;
 let moodIntervalId = null, moodCanvas = null;
 let judgeVideoStreamActive = false, judgeAudioEl = null;
 
+// Mood-driven rotation state. activeJudge is the judge whose ROOM we're
+// actually joined to right now (vs. swapJudge which only updates the visual
+// .active card). rotationCounter is the suffix we tack onto the room name on
+// each rejoin since LiveKit + LemonSlice lock one judge per room.
+let activeJudge = SELECTED_JUDGE;
+let switching = false;
+let rotationCounter = 0;
+let judgeHistory = [];
+let stableIdentity = null;
+const JUDGE_HISTORY_LEN = 2;
+
 // Transcript accumulator: consecutive deltas from the same speaker append
 // into one line. A line closes on speaker change, ~1.2s silence, final mode,
 // or speaking_end.
 let activeTranscriptLine = null, activeTranscriptKey = null, activeTranscriptTimer = null;
 const TRANSCRIPT_SILENCE_MS = 1200;
+
+// Pitch timer state. The frontend is the authoritative timer source for the
+// 60 second opening pitch window. The judge agent observes the same protocol
+// via a `pitch_complete` LiveKit data message + WebSocket broadcast.
+// The frontend cannot read backend env vars, so PITCH_TIMER_DEFAULT is the
+// baseline. URL `?timer=N` overrides for quick demo tweaks (e.g. ?timer=15
+// for stage rehearsal). Keep in sync with PITCH_PREAMBLE in agent.py.
+const PITCH_TIMER_DEFAULT = 60;
+const PITCH_TIMER_OVERRIDE = (() => {
+  const raw = parseInt(urlParams.get('timer'), 10);
+  if (!Number.isFinite(raw) || raw <= 0 || raw > 600) return null;
+  return raw;
+})();
+const PITCH_TIMER_SECONDS = PITCH_TIMER_OVERRIDE || PITCH_TIMER_DEFAULT;
+let pitchSecondsRemaining = PITCH_TIMER_SECONDS;
+let pitchIntervalId = null;
+let pitchPhase = 'idle';
+let pitchCompleteSent = false;
 
 // DOM refs
 const setupScreen    = document.getElementById('setup-screen');
@@ -1249,6 +969,9 @@ const pauseBtn       = document.getElementById('pause-btn');
 const exitBtn        = document.getElementById('exit-btn');
 const shareBtn       = document.getElementById('share-btn');
 const remoteAudioSink = document.getElementById('remote-audio');
+const pitchTimerEl   = document.getElementById('pitch-timer');
+const pitchTimerLabel = pitchTimerEl ? pitchTimerEl.querySelector('.phase-label') : null;
+const pitchTimerSeconds = pitchTimerEl ? pitchTimerEl.querySelector('.seconds') : null;
 
 (function initSetupPanel() {
   const info = JUDGE_INFO[SELECTED_JUDGE];
@@ -1281,103 +1004,24 @@ async function startSession() {
     if (!window.LivekitClient) {
       throw new Error('LiveKit JS SDK failed to load.');
     }
-    const { Room, RoomEvent, Track, ConnectionState, createLocalTracks } = LivekitClient;
 
-    // Stable per-tab identity for the founder participant.
-    const identity = `founder-${randomId()}`;
+    // Stable per-tab identity for the founder participant. Reused across
+    // mood-driven judge rotations so backend telemetry can correlate the
+    // founder across rooms.
+    if (!stableIdentity) stableIdentity = `founder-${randomId()}`;
 
     // Fetch the LiveKit access token from the backend.
     setupMsg.textContent = 'Fetching access token...';
-    const tokenUrl = `${API_BASE}/token?room=${encodeURIComponent(ROOM)}`
-      + `&identity=${encodeURIComponent(identity)}`
-      + `&judge_key=${encodeURIComponent(SELECTED_JUDGE)}`;
-    const res = await fetch(tokenUrl);
-    if (!res.ok) throw new Error(`/token returned ${res.status}`);
-    const payload = await res.json();
-    if (payload.error) throw new Error(payload.error);
-    const token  = payload.token;
-    const wsHost = payload.url || payload.ws_url;
-    if (!token || !wsHost) throw new Error('Token response missing token or url');
+    const { token, wsHost } = await fetchJudgeToken(ROOM, SELECTED_JUDGE, stableIdentity);
 
     setupMsg.textContent = 'Connecting to LiveKit room...';
 
     // Create the Room with single-layer publishing to keep latency low.
-    room = new Room({
-      adaptiveStream: true,
-      dynacast: true,
-      publishDefaults: { videoSimulcastLayers: [], videoSimulcast: false },
-    });
+    room = createRoom();
 
     // Wire remote-track handlers BEFORE connecting so we never miss the
     // first SubscriptionEvent from the agent / avatar participant.
-    room.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
-      // Ignore any echo of our own published media if the SFU loops it back.
-      if (participant && participant.identity && participant.identity.startsWith('founder-')) return;
-
-      if (track.kind === Track.Kind.Video) {
-        try { track.attach(judgeVideoEl); }
-        catch (e) { console.warn('Failed to attach remote video:', e); }
-        judgeVideoStreamActive = true;
-        judgeVideoEl.classList.add('has-stream');
-        document.body.classList.add('has-judge-video');
-      } else if (track.kind === Track.Kind.Audio) {
-        // Pipe judge voice into the hidden audio sink so the user hears it.
-        try {
-          const el = track.attach();
-          el.autoplay = true;
-          el.playsInline = true;
-          if (isPaused) el.muted = true;
-          remoteAudioSink.appendChild(el);
-          judgeAudioEl = el;
-        } catch (e) {
-          console.warn('Failed to attach remote audio:', e);
-        }
-      }
-    });
-
-    room.on(RoomEvent.TrackUnsubscribed, (track) => {
-      try {
-        const elements = track.detach();
-        if (Array.isArray(elements)) {
-          elements.forEach((el) => el && el.remove && el.remove());
-        }
-      } catch (e) {
-        console.warn('Detach error:', e);
-      }
-      if (track.kind === LivekitClient.Track.Kind.Video) {
-        judgeVideoStreamActive = false;
-        judgeVideoEl.classList.remove('has-stream');
-        document.body.classList.remove('has-judge-video');
-      }
-      if (judgeAudioEl && track.kind === LivekitClient.Track.Kind.Audio) {
-        judgeAudioEl = null;
-      }
-    });
-
-    room.on(RoomEvent.ParticipantConnected, (participant) => {
-      console.log('Participant connected:', participant.identity);
-    });
-
-    room.on(RoomEvent.ParticipantDisconnected, (participant) => {
-      console.log('Participant disconnected:', participant.identity);
-    });
-
-    room.on(RoomEvent.Disconnected, () => {
-      rtcReady = false;
-      if (!sessionEnded) setRtcStatus('red', 'LIVEKIT OFFLINE');
-    });
-
-    room.on(RoomEvent.ConnectionStateChanged, (state) => {
-      if (state === ConnectionState.Connected) {
-        rtcReady = true;
-        setRtcStatus('green', `LIVEKIT · ${ROOM}`);
-      } else if (state === ConnectionState.Reconnecting) {
-        setRtcStatus('yellow', 'RECONNECTING');
-      } else if (state === ConnectionState.Disconnected) {
-        rtcReady = false;
-        if (!sessionEnded) setRtcStatus('red', 'LIVEKIT OFFLINE');
-      }
-    });
+    wireRoomHandlers(room, ROOM);
 
     // Connect to the LiveKit room.
     await room.connect(wsHost, token);
@@ -1389,36 +1033,22 @@ async function startSession() {
     // the upload bandwidth tight so the agent gets the headroom it needs to
     // talk back without buffering.
     setupMsg.textContent = 'Requesting camera + microphone access...';
-    localTracks = await createLocalTracks({
-      audio: true,
-      video: { resolution: { width: 640, height: 360, frameRate: 24 } },
-    });
-
-    for (const t of localTracks) {
-      await room.localParticipant.publishTrack(t);
-    }
-
-    // Attach local video to the YOU panel.
-    const videoTrack = localTracks.find((t) => t.kind === Track.Kind.Video);
-    if (videoTrack) {
-      const localContainer = document.getElementById('local-video');
-      try {
-        const el = videoTrack.attach();
-        el.autoplay = true;
-        el.playsInline = true;
-        el.muted = true;
-        localContainer.appendChild(el);
-      } catch (e) {
-        console.warn('Local video attach error:', e);
-      }
-    }
+    await acquireAndPublishLocalMedia();
 
     pauseBtn.disabled = false;
     exitBtn.disabled  = false;
     shareBtn.disabled = false;
 
+    // First successful connect: lock in the active judge identity so the
+    // mood-driven rotation has a starting point.
+    activeJudge = SELECTED_JUDGE;
+
     // Begin periodic mood frame capture from the injected <video>.
     startMoodCapture();
+
+    // Kick off the 60s pitch countdown. The judge agent stays silent until
+    // it sees the pitch_complete event the timer publishes on expiry.
+    startPitchTimer();
 
     // Hide setup overlay.
     setupScreen.style.display = 'none';
@@ -1433,6 +1063,148 @@ async function startSession() {
     joinBtn.textContent = 'Retry';
     setupError.textContent = `Error: ${err && err.message ? err.message : err}`;
     console.error(err);
+  }
+}
+
+// Build a fresh LiveKit Room object with the same publish defaults the
+// initial connect used. Centralized so switchJudge gets identical settings.
+function createRoom() {
+  const { Room } = LivekitClient;
+  return new Room({
+    adaptiveStream: true,
+    dynacast: true,
+    publishDefaults: { videoSimulcastLayers: [], videoSimulcast: false },
+  });
+}
+
+// Wire all RoomEvent handlers we depend on. The roomLabel arg keeps the
+// status pill consistent across rotations (each rejoin gets a fresh room
+// suffix so the label should reflect what we're actually joined to).
+function wireRoomHandlers(targetRoom, roomLabel) {
+  const { RoomEvent, Track, ConnectionState } = LivekitClient;
+
+  targetRoom.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
+    // Ignore any echo of our own published media if the SFU loops it back.
+    if (participant && participant.identity && participant.identity.startsWith('founder-')) return;
+
+    if (track.kind === Track.Kind.Video) {
+      try { track.attach(judgeVideoEl); }
+      catch (e) { console.warn('Failed to attach remote video:', e); }
+      judgeVideoStreamActive = true;
+      judgeVideoEl.classList.add('has-stream');
+      document.body.classList.add('has-judge-video');
+    } else if (track.kind === Track.Kind.Audio) {
+      // Pipe judge voice into the hidden audio sink so the user hears it.
+      try {
+        const el = track.attach();
+        el.autoplay = true;
+        el.playsInline = true;
+        if (isPaused) el.muted = true;
+        remoteAudioSink.appendChild(el);
+        judgeAudioEl = el;
+      } catch (e) {
+        console.warn('Failed to attach remote audio:', e);
+      }
+    }
+  });
+
+  targetRoom.on(RoomEvent.TrackUnsubscribed, (track) => {
+    try {
+      const elements = track.detach();
+      if (Array.isArray(elements)) {
+        elements.forEach((el) => el && el.remove && el.remove());
+      }
+    } catch (e) {
+      console.warn('Detach error:', e);
+    }
+    if (track.kind === LivekitClient.Track.Kind.Video) {
+      judgeVideoStreamActive = false;
+      judgeVideoEl.classList.remove('has-stream');
+      document.body.classList.remove('has-judge-video');
+    }
+    if (judgeAudioEl && track.kind === LivekitClient.Track.Kind.Audio) {
+      judgeAudioEl = null;
+    }
+  });
+
+  targetRoom.on(RoomEvent.ParticipantConnected, (participant) => {
+    console.log('Participant connected:', participant.identity);
+  });
+
+  targetRoom.on(RoomEvent.ParticipantDisconnected, (participant) => {
+    console.log('Participant disconnected:', participant.identity);
+  });
+
+  targetRoom.on(RoomEvent.Disconnected, () => {
+    rtcReady = false;
+    if (!sessionEnded && !switching) {
+      setRtcStatus('red', 'LIVEKIT OFFLINE');
+      // The data channel is gone, so further pitch_complete sends would
+      // throw. Stop the countdown unless we are mid-rotation, in which case
+      // rejoinAsJudge restores the room and the timer keeps its state.
+      stopPitchTimer();
+    }
+  });
+
+  targetRoom.on(RoomEvent.ConnectionStateChanged, (state) => {
+    if (state === ConnectionState.Connected) {
+      rtcReady = true;
+      setRtcStatus('green', `LIVEKIT · ${roomLabel}`);
+    } else if (state === ConnectionState.Reconnecting) {
+      setRtcStatus('yellow', 'RECONNECTING');
+    } else if (state === ConnectionState.Disconnected) {
+      rtcReady = false;
+      if (!sessionEnded && !switching) setRtcStatus('red', 'LIVEKIT OFFLINE');
+    }
+  });
+}
+
+// Fetch a fresh token. Used by both initial connect and switchJudge.
+async function fetchJudgeToken(roomName, judgeKey, identity) {
+  const tokenUrl = `${API_BASE}/token?room=${encodeURIComponent(roomName)}`
+    + `&identity=${encodeURIComponent(identity)}`
+    + `&judge_key=${encodeURIComponent(judgeKey)}`;
+  const res = await fetch(tokenUrl);
+  if (!res.ok) throw new Error(`/token returned ${res.status}`);
+  const payload = await res.json();
+  if (payload.error) throw new Error(payload.error);
+  const token  = payload.token;
+  const wsHost = payload.url || payload.ws_url;
+  if (!token || !wsHost) throw new Error('Token response missing token or url');
+  return { token, wsHost };
+}
+
+// Request mic + camera, publish them, and attach the local preview into the
+// YOU panel. Shared by startSession and switchJudge.
+async function acquireAndPublishLocalMedia() {
+  const { Track, createLocalTracks } = LivekitClient;
+  localTracks = await createLocalTracks({
+    audio: true,
+    video: { resolution: { width: 640, height: 360, frameRate: 24 } },
+  });
+
+  for (const t of localTracks) {
+    await room.localParticipant.publishTrack(t);
+  }
+
+  const videoTrack = localTracks.find((t) => t.kind === Track.Kind.Video);
+  if (videoTrack) {
+    const localContainer = document.getElementById('local-video');
+    // Clear any previous <video> element from a prior session before
+    // attaching the new track, otherwise the YOU panel stacks multiple
+    // frozen frames after a rotation.
+    if (localContainer) {
+      localContainer.querySelectorAll('video').forEach((el) => el.remove());
+    }
+    try {
+      const el = videoTrack.attach();
+      el.autoplay = true;
+      el.playsInline = true;
+      el.muted = true;
+      if (localContainer) localContainer.appendChild(el);
+    } catch (e) {
+      console.warn('Local video attach error:', e);
+    }
   }
 }
 
@@ -1496,6 +1268,13 @@ function handleMessage(msg) {
     case 'mood_update':
       setConfidence(msg.mood);
       document.getElementById('scene-line').textContent = msg.scene || '--';
+      // Mood-driven judge rotation. Backend tells us which judge bucket the
+      // current mood maps to; we only commit to switching when the last two
+      // mood_updates agree on a target that differs from the live judge.
+      if (msg.target_judge && JUDGE_INFO[msg.target_judge]) {
+        recordTargetJudge(msg.target_judge);
+        maybeRotateJudge();
+      }
       break;
 
     case 'speaking_start':
@@ -1600,8 +1379,126 @@ function closeActiveLine() {
   activeTranscriptKey   = null;
 }
 
+// ---------------------------------------------------------------------------
+// Pitch timer
+// ---------------------------------------------------------------------------
+
+/** Update the header pill UI for the current phase and remaining seconds. */
+function renderPitchTimer() {
+  if (!pitchTimerEl) return;
+  pitchTimerEl.dataset.phase = pitchPhase;
+  if (pitchPhase === 'idle') {
+    if (pitchTimerLabel) pitchTimerLabel.textContent = 'Ready';
+    if (pitchTimerSeconds) pitchTimerSeconds.textContent = String(PITCH_TIMER_SECONDS);
+    pitchTimerEl.removeAttribute('data-warn');
+    return;
+  }
+  if (pitchPhase === 'pitching') {
+    if (pitchTimerLabel) pitchTimerLabel.textContent = 'Pitch';
+    if (pitchTimerSeconds) pitchTimerSeconds.textContent = String(Math.max(0, pitchSecondsRemaining));
+    if (pitchSecondsRemaining <= 5) {
+      pitchTimerEl.dataset.warn = 'red';
+    } else if (pitchSecondsRemaining <= 10) {
+      pitchTimerEl.dataset.warn = 'amber';
+    } else {
+      pitchTimerEl.removeAttribute('data-warn');
+    }
+    return;
+  }
+  if (pitchPhase === 'qa') {
+    if (pitchTimerLabel) pitchTimerLabel.textContent = 'Q & A';
+    if (pitchTimerSeconds) pitchTimerSeconds.textContent = 'OPEN';
+    pitchTimerEl.removeAttribute('data-warn');
+  }
+}
+
+/** Begin the 60s pitch countdown. Safe to call once per session. */
+function startPitchTimer() {
+  if (pitchIntervalId) return;
+  pitchPhase = 'pitching';
+  pitchSecondsRemaining = PITCH_TIMER_SECONDS;
+  pitchCompleteSent = false;
+  renderPitchTimer();
+  pitchIntervalId = setInterval(pitchTick, 1000);
+}
+
+/** Single tick of the pitch countdown. Decrement, render, or finish. */
+function pitchTick() {
+  pitchSecondsRemaining -= 1;
+  if (pitchSecondsRemaining <= 0) {
+    pitchSecondsRemaining = 0;
+    finishPitchTimer();
+    return;
+  }
+  renderPitchTimer();
+}
+
+/** Pause the countdown without changing phase. Idempotent. */
+function pausePitchTimer() {
+  if (pitchPhase !== 'pitching') return;
+  if (pitchIntervalId) {
+    clearInterval(pitchIntervalId);
+    pitchIntervalId = null;
+  }
+}
+
+/** Resume the countdown if we are still in the pitch phase. Idempotent. */
+function resumePitchTimer() {
+  if (pitchPhase !== 'pitching') return;
+  if (pitchIntervalId) return;
+  pitchIntervalId = setInterval(pitchTick, 1000);
+}
+
+/** Transition into Q&A phase and broadcast pitch_complete to agent + backend. */
+function finishPitchTimer() {
+  if (pitchIntervalId) {
+    clearInterval(pitchIntervalId);
+    pitchIntervalId = null;
+  }
+  pitchPhase = 'qa';
+  renderPitchTimer();
+  publishPitchComplete();
+}
+
+/** Stop the interval without changing phase. Used on exit / disconnect. */
+function stopPitchTimer() {
+  if (pitchIntervalId) {
+    clearInterval(pitchIntervalId);
+    pitchIntervalId = null;
+  }
+}
+
+/** Send pitch_complete on the LiveKit data channel and the WebSocket. */
+function publishPitchComplete() {
+  if (pitchCompleteSent) return;
+  pitchCompleteSent = true;
+  const payloadObj = { type: 'pitch_complete' };
+  // LiveKit data channel: this is the path the agent worker subscribes to.
+  if (room && room.localParticipant && typeof room.localParticipant.publishData === 'function') {
+    try {
+      const encoded = new TextEncoder().encode(JSON.stringify(payloadObj));
+      const maybePromise = room.localParticipant.publishData(encoded, { reliable: true });
+      if (maybePromise && typeof maybePromise.catch === 'function') {
+        maybePromise.catch((err) => console.warn('pitch_complete publishData failed:', err));
+      }
+    } catch (e) {
+      console.warn('pitch_complete publishData threw:', e);
+    }
+  }
+  // WebSocket: forward-compatible hook so main.py can react later if needed.
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    try { ws.send(JSON.stringify(payloadObj)); }
+    catch (e) { console.warn('pitch_complete ws send failed:', e); }
+  }
+}
+
 function flashJudgeOverlay(text, ms) {
-  const ovl = document.getElementById('judge-status-overlay');
+  // Prefer the overlay on the currently active judge card so the message
+  // always appears on the visible speaker; fall back to the legacy cuban
+  // overlay id when an old caller still references it.
+  const ovl =
+    document.getElementById(`judge-status-overlay-${currentJudge}`)
+    || document.getElementById('judge-status-overlay-cuban');
   if (!ovl) return;
   ovl.textContent = text;
   ovl.classList.add('interrupted');
@@ -1609,6 +1506,170 @@ function flashJudgeOverlay(text, ms) {
     ovl.classList.remove('interrupted');
     ovl.textContent = '';
   }, ms);
+}
+
+// Push the latest backend-suggested judge into the rolling history. Length
+// stays capped at JUDGE_HISTORY_LEN so the hysteresis check stays cheap.
+function recordTargetJudge(key) {
+  judgeHistory.push(key);
+  if (judgeHistory.length > JUDGE_HISTORY_LEN) {
+    judgeHistory.shift();
+  }
+}
+
+// Hysteresis gate: only rotate when the last 2 suggestions agree and differ
+// from the judge we're actually connected to. A switch already in flight
+// blocks reentry; pause and session end disable rotation entirely.
+function maybeRotateJudge() {
+  if (switching || sessionEnded) return;
+  if (judgeHistory.length < JUDGE_HISTORY_LEN) return;
+  const first = judgeHistory[0];
+  const last  = judgeHistory[judgeHistory.length - 1];
+  if (first !== last) return;
+  if (last === activeJudge) return;
+  switchJudge(last).catch((e) => console.warn('switchJudge unhandled rejection:', e));
+}
+
+// Tear the current LiveKit room down and rejoin with a fresh room name so
+// the agent worker picks up the new judge persona. The rotationCounter
+// suffix forces a brand-new room since LemonSlice + the dispatched agent
+// lock one judge per room.
+async function switchJudge(newKey) {
+  if (switching || sessionEnded) return;
+  if (!newKey || !JUDGE_INFO[newKey]) return;
+  if (newKey === activeJudge) return;
+
+  switching = true;
+  const previousJudge = activeJudge;
+  const info = JUDGE_INFO[newKey] || {};
+  const niceName = info.name || newKey;
+
+  // Immediate UI feedback: light the new card and show a "Switching to..."
+  // overlay on it so the user knows the rotation kicked off.
+  swapJudge(newKey);
+  showSwitchingOverlay(newKey, niceName);
+
+  // Pause the mood-frame loop while we tear the room down so we aren't
+  // captured midway through reconnection. The auto-rotation guard already
+  // prevents re-entry, but stopping the capture also avoids piling frames
+  // into a dead websocket if something goes wrong.
+  stopMoodCapture();
+
+  try {
+    await rejoinAsJudge(newKey);
+    activeJudge = newKey;
+    hideSwitchingOverlay(newKey);
+    startMoodCapture();
+    switching = false;
+  } catch (err) {
+    console.error('switchJudge failed for', newKey, err);
+    hideSwitchingOverlay(newKey);
+    switching = false;
+
+    // Best-effort fallback: try to come back online as the previous judge so
+    // the session keeps running. If that also fails, surface a toast and
+    // restore the previous card visually.
+    try {
+      switching = true;
+      await rejoinAsJudge(previousJudge);
+      activeJudge = previousJudge;
+      swapJudge(previousJudge);
+      startMoodCapture();
+      switching = false;
+    } catch (retryErr) {
+      console.error('switchJudge retry to previous judge failed:', retryErr);
+      switching = false;
+      swapJudge(previousJudge);
+      showSwitchToast(`Failed to switch judge: ${(err && err.message) || err}`);
+    }
+  }
+}
+
+// Disconnect from the current room, stop local tracks, then mint a fresh
+// token for the requested judge and reconnect + republish. Throws on any
+// network or media failure so switchJudge can run its retry path.
+async function rejoinAsJudge(judgeKey) {
+  // 1. Disconnect and stop existing local tracks.
+  if (room) {
+    try { await room.disconnect(); }
+    catch (e) { console.warn('rejoin: disconnect failed:', e); }
+    room = null;
+  }
+  for (const t of localTracks) {
+    try { t.stop(); } catch (e) { console.warn('rejoin: track stop failed:', e); }
+  }
+  localTracks = [];
+
+  // Reset judge-video state since the old remote track is gone.
+  judgeVideoStreamActive = false;
+  if (judgeVideoEl) judgeVideoEl.classList.remove('has-stream');
+  document.body.classList.remove('has-judge-video');
+  if (judgeAudioEl) {
+    try { judgeAudioEl.remove(); } catch (e) { /* ignore */ }
+    judgeAudioEl = null;
+  }
+
+  // 2. Compute a fresh room name. LemonSlice + the dispatched agent worker
+  // lock one judge per room, so every rotation needs a new room id.
+  rotationCounter += 1;
+  const newRoom = `${ROOM}-r${rotationCounter}`;
+
+  // 3. Fetch a new token for that room + judge.
+  const { token, wsHost } = await fetchJudgeToken(newRoom, judgeKey, stableIdentity);
+
+  // 4. Recreate the Room object and rewire the shared handlers.
+  room = createRoom();
+  wireRoomHandlers(room, newRoom);
+
+  // 5. Connect to LiveKit and republish mic + camera.
+  await room.connect(wsHost, token);
+  rtcReady = true;
+  setRtcStatus('green', `LIVEKIT · ${newRoom}`);
+  roomInfo.textContent = `Room ${newRoom}`;
+  await acquireAndPublishLocalMedia();
+
+  // Reapply pause state to the newly published tracks if the founder paused
+  // mid-rotation.
+  if (isPaused) {
+    try {
+      await room.localParticipant.setMicrophoneEnabled(false);
+      await room.localParticipant.setCameraEnabled(false);
+    } catch (e) {
+      console.warn('rejoin: reapply pause failed:', e);
+    }
+  }
+}
+
+// Visual feedback while a switch is in flight. The overlay rides on top of
+// the new judge's card so the user sees who is coming online.
+function showSwitchingOverlay(judgeKey, niceName) {
+  const ovl = document.getElementById(`judge-status-overlay-${judgeKey}`);
+  if (!ovl) return;
+  ovl.textContent = `Switching to ${(niceName || judgeKey).toUpperCase()}...`;
+  ovl.classList.add('switching');
+}
+
+function hideSwitchingOverlay(judgeKey) {
+  const ovl = document.getElementById(`judge-status-overlay-${judgeKey}`);
+  if (!ovl) return;
+  ovl.classList.remove('switching');
+  ovl.textContent = '';
+}
+
+// Persistent toast under the confidence card for switch failures. Auto
+// dismisses after ~4s so it doesn't camp on screen forever.
+let switchToastTimer = null;
+function showSwitchToast(message) {
+  const toast = document.getElementById('switch-toast');
+  if (!toast) return;
+  toast.textContent = message;
+  toast.classList.add('visible');
+  if (switchToastTimer) clearTimeout(switchToastTimer);
+  switchToastTimer = setTimeout(() => {
+    toast.classList.remove('visible');
+    toast.textContent = '';
+    switchToastTimer = null;
+  }, 4000);
 }
 
 function escHtml(str) {
@@ -1651,6 +1712,14 @@ pauseBtn.addEventListener('click', async () => {
 
   document.body.classList.toggle('paused', isPaused);
   pauseBtn.textContent = isPaused ? 'Resume' : 'Pause';
+
+  // Match the timer to the pause state so the pitch window does not run down
+  // while the founder is muted.
+  if (isPaused) {
+    pausePitchTimer();
+  } else {
+    resumePitchTimer();
+  }
 });
 
 // Share Screen / Stop Sharing (LiveKit)
@@ -1723,6 +1792,7 @@ exitBtn.addEventListener('click', async () => {
   shareBtn.disabled = true;
 
   stopMoodCapture();
+  stopPitchTimer();
 
   if (sharingScreen) {
     try { await stopScreenShare(); } catch (e) { console.warn('stopScreenShare on exit failed:', e); }
