@@ -1,5 +1,7 @@
 # Shark Tank Pitch Simulator
 
+🏆 **1st Place — Tencent Sprint Track** at ACM x AIC Hack-A-Stack
+
 Built at ACM x AIC Hack-A-Stack at SCU, May 16 2026, 6-hour sprint track. Sponsor tracks: Tencent Cloud (judge side) and GetStream Vision Agents (user side). After two rounds of stack changes, P1's scope shrank to credentials handoff and Tencent COS session logging. Runtime orchestration now lives in Vision Agents (P2).
 
 ## What this is
