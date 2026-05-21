@@ -93,15 +93,3 @@ This repo hands four things over the wall to the Vision Agents backend:
 - **Live COS endpoints.** The Vision Agents backend calls `cos.upload_audio()` and `cos.upload_session()` directly from inside Vision Agents.
 
 Credentials are never committed. They are sent to the Vision Agents backend over a secure channel (DM, Signal, 1Password share), then pasted into a gitignored `.env` on that side. The Vision Agents backend can fork `reference/vision_agents_starter.py` as a starting point.
-
-## Archived files
-
-| File | Why archived |
-| - | - |
-| `hunyuan.py` | Hunyuan dropped, Gemini Live is the sole LLM |
-| `tts.py` | Tencent TTS dropped, Gemini Live produces audio natively |
-| `ivh.py` | IVH dropped, the browser frontend builds 2D pixel-art images instead (6 total) |
-| `chunker.py` | Existed for the Tencent TTS 500-char limit, no longer needed |
-| `pipeline.py` | Orchestration moved into the Vision Agents backend |
-| `mock.py`, `demo.py` | This repo no longer runs a pipeline, Vision Agents drives the loop |
-| `feedback.py` | End screen moved to the browser frontend |
