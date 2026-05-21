@@ -61,7 +61,7 @@ def render_judge(
       - For STATIC: {"mode": "static", "image_path": "...", "audio_bytes": b"..."}
       - For IVH:    {"mode": "ivh", "video_url": "..."}
 
-    The frontend (P3) reads .mode to decide how to render.
+    The browser frontend reads .mode to decide how to render.
     """
     if mode == RenderMode.STATIC:
         return _render_static(judge_key, audio_bytes)

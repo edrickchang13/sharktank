@@ -1,6 +1,6 @@
 # Secrets: NEVER commit any file matching these.
 # Real credentials live ONLY in local .env (this file is gitignored).
-# Tracked files MUST use placeholders like <from P1 via secure channel>, never real values.
+# Tracked files MUST use placeholders like <from secure channel>, never real values.
 .env
 .env.*
 !.env.example

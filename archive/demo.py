@@ -1,4 +1,4 @@
-"""CLI that runs one full Shark Tank pitch round end-to-end for local P1 validation."""
+"""CLI that runs one full Shark Tank pitch round end-to-end for local validation."""
 
 import argparse
 import json

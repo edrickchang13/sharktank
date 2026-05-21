@@ -1,4 +1,4 @@
-"""End-to-end P1 pipeline: transcript + mood -> judge text + audio + render.
+"""End-to-end pipeline: transcript + mood -> judge text + audio + render.
 
 Drop-in replacement for `mock.respond_to_pitch`. Swap the import in the frontend
 once real Tencent credentials are in place.
@@ -19,7 +19,7 @@ def respond_to_pitch(
     history: list[dict] | None = None,
     render_mode: ivh.RenderMode = ivh.RenderMode.STATIC,
 ) -> dict:
-    """Run the full P1 pipeline for one turn.
+    """Run the full pipeline for one turn.
 
     Returns the same shape as mock.respond_to_pitch so the frontend can swap
     imports without other changes:

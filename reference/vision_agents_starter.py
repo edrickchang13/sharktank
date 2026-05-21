@@ -1,15 +1,16 @@
-"""Vision Agents starter for Shark Tank Simulator (P2 reference).
+"""Vision Agents starter for Shark Tank Simulator (reference starter).
 
 Wired: tencent.Edge() primary with getstream.Edge() fallback, gemini.Realtime
 with response_modalities=[AUDIO] and per-judge voice swap, judge prompts
 from judges_export.json, judge rotation (cuban opens, low-mood -> corcoran,
 else rotate), COS callbacks for per-turn audio + session JSON.
 
-P2 owns: websocket transport to P3, real mood processor (webcam, ~3s),
-agent.llm hot-swap or agent reconstruction per judge change, Stream REST
-participant polling so the agent joins only after the browser has joined.
+Owned by the Vision Agents backend: websocket transport to the browser
+frontend, real mood processor (webcam, ~3s), agent.llm hot-swap or agent
+reconstruction per judge change, Stream REST participant polling so the agent
+joins only after the browser has joined.
 
-Required env vars (from P1's secure DM, paste into .env):
+Required env vars (from a secure channel, paste into .env):
   TRTC_SDK_APP_ID, TRTC_SECRET_KEY (Tencent transport, primary)
   STREAM_API_KEY, STREAM_API_SECRET (GetStream transport, fallback)
   GOOGLE_API_KEY (Gemini Live, sole LLM+TTS+VAD)
@@ -121,10 +122,10 @@ def wait_for_participant(call_id: str, timeout_s: int = 120) -> None:
     """Poll Stream REST API for participants in call_id. Returns when first
     non-agent participant joins. Raises TimeoutError after timeout_s.
 
-    P2 finding: agent.Edge() join() against an empty room times out.
+    Note: agent.Edge() join() against an empty room times out.
     Browser must join first.
     """
-    # TODO(P2): poll GET /video/call/default/{call_id} every 2-3s for
+    # TODO: poll GET /video/call/default/{call_id} every 2-3s for
     # participants list; return when len(participants) > 0 and any
     # participant is not the agent itself.
     raise NotImplementedError("Poll Stream REST API here")
@@ -161,7 +162,7 @@ class Session:
 
 
 def get_mood() -> float:
-    """Latest mood snapshot. P2 replaces with real webcam analysis (~3s)."""
+    """Latest mood snapshot. Replace with real webcam analysis (~3s)."""
     return 0.6  # placeholder
 
 
@@ -172,7 +173,7 @@ def on_turn_end(session: Session, transcript: str, agent: "Agent") -> dict[str, 
 
     Returns dict to emit to websocket: {judge, text, audio}.
     """
-    import cos  # P1's module, sibling to your Vision Agents app
+    import cos  # this repo's module, sibling to your Vision Agents app
 
     start = time.monotonic()
     session.mood = get_mood()
@@ -187,10 +188,10 @@ def on_turn_end(session: Session, transcript: str, agent: "Agent") -> dict[str, 
 
     # Vision Agents will send transcript -> gemini.Realtime, stream the audio
     # response on the call track, and emit audio bytes via
-    # _emit_audio_output_event. P2: capture those bytes (24kHz PCM) and any
+    # _emit_audio_output_event. Capture those bytes (24kHz PCM) and any
     # emitted text, then fill in:
-    audio_bytes_24khz_pcm = b""  # P2 fills from agent output
-    response_text = ""  # P2 fills from agent output
+    audio_bytes_24khz_pcm = b""  # fill from agent output
+    response_text = ""  # fill from agent output
 
     try:
         audio_url = cos.upload_audio(
@@ -203,9 +204,10 @@ def on_turn_end(session: Session, transcript: str, agent: "Agent") -> dict[str, 
     latency_ms = int((time.monotonic() - start) * 1000)
     session.add_turn(transcript, next_judge, response_text, audio_url, latency_ms)
 
-    # P2: emit this over your websocket to P3. P3 expects {judge, text, audio}.
-    # Audio may need transcoding (raw 24kHz PCM vs. base64 MP3) before P3
-    # can play it; confirm format with P3 during integration.
+    # Emit this over the websocket to the browser frontend, which expects
+    # {judge, text, audio}. Audio may need transcoding (raw 24kHz PCM vs.
+    # base64 MP3) before the browser frontend can play it; confirm format
+    # with the browser frontend during integration.
     return {
         "judge": next_judge,
         "text": response_text,
@@ -239,8 +241,9 @@ def main() -> None:
     3. Build agent and call agent.run() / lifecycle method
     4. Agent participates in the call, emits audio, fires on_turn_end on
        Gemini's internal VAD events
-    5. P2 routes on_turn_end to cos.upload_audio and emits the websocket
-       message {judge, text, audio} to P3
+    5. The Vision Agents backend routes on_turn_end to cos.upload_audio and
+       emits the websocket message {judge, text, audio} to the browser
+       frontend
 
     Gotcha: under `uv run`, asyncio.run_in_executor(None, input) fails with
     EOFError because there is no stdin. Use wait_for_participant (REST poll)
@@ -253,7 +256,7 @@ def main() -> None:
     print(f"Initial judge: {session.current_judge} ({voice})")
     print("Sample prompt (Cuban, mood=0.5):")
     print("  " + render_system_prompt("cuban", 0.5)[:200] + "...")
-    # P2: uncomment once Vision Agents deps are installed:
+    # Uncomment once Vision Agents deps are installed:
     # agent = build_agent(session); agent.run()
 
 

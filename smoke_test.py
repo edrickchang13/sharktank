@@ -1,6 +1,6 @@
 """Smoke test for the Shark Tank simulator (live modules only).
 
-Tests the reduced P1 scope: judges, trtc, cos. Archived modules (hunyuan,
+Tests this repo's scope: judges, trtc, cos. Archived modules (hunyuan,
 tts, ivh, chunker, pipeline, mock, demo, feedback) are intentionally not
 imported. Runnable as `python smoke_test.py` — pure stdlib, no pytest.
 """

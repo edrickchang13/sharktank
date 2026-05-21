@@ -30,7 +30,7 @@ _BASE_DIR = Path(__file__).resolve().parent
 
 
 def respond_to_pitch(judge_key: str, transcript: str, mood: float, history: list[dict] | None = None) -> dict:
-    """Mock version of the full P1 pipeline.
+    """Mock version of the full pipeline.
 
     Returns:
       {
