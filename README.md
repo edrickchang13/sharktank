@@ -105,12 +105,3 @@ Credentials are never committed. They are sent to the Vision Agents backend over
 | `pipeline.py` | Orchestration moved into the Vision Agents backend |
 | `mock.py`, `demo.py` | This repo no longer runs a pipeline, Vision Agents drives the loop |
 | `feedback.py` | End screen moved to the browser frontend |
-
-## Open questions
-
-- Whether Vision Agents can hot-swap `agent.llm` mid-session so the active judge changes without tearing down the TRTC connection or the turn-detection state. If not, plan B is reconstructing the agent per judge change, costing 1-2 seconds of dead air.
-- smart-turn VAD compatibility under `tencent.Edge()` on the `feat/tencent-rtc` branch is unverified. Fallback is `silero.VAD()`.
-- Gemini Live emits 24kHz PCM. Open whether the browser frontend plays raw PCM through `AudioBufferSourceNode` directly, or whether the websocket layer transcodes to MP3 first. PCM keeps latency lower, MP3 plays trivially in `<audio>`.
-- The backend-to-frontend websocket schema may need extra fields (`turn_idx`, `mood`, `session_id`) so this repo's COS logging can stitch the session log together from one source of truth.
-</content>
-</invoke>
